@@ -140,6 +140,9 @@ func (bc *Blockchain) GetBlock(height *big.Int) (*types.Block, error) {
 }
 
 func (bc *Blockchain) GetHeader(height *big.Int) (*types.Header, error) {
+	if height.Cmp(big.NewInt(int64(len(bc.headers)))) == 1 {
+		return nil, fmt.Errorf("blockchain height [%d] is less than requested height [%d]", len(bc.headers), height.Int64())
+	}
 	return bc.headers[height.Int64()], nil
 }
 
@@ -178,7 +181,7 @@ func (bc *Blockchain) Headers() []*types.Header {
 
 func (bc *Blockchain) addBlockWithoutValidation(b *types.Block) error {
 	// bc.lock.Lock()
-
+	// defer bc.lock.Unlock()
 	bc.headers = append(bc.headers, b.Header())
 
 	// Store block with block hash as key
@@ -188,8 +191,9 @@ func (bc *Blockchain) addBlockWithoutValidation(b *types.Block) error {
 	// 	return err
 	// }
 	// fmt.Printf("BBLOCK => Writing block to db: %+v\n", b)
+	bc.lock.Lock()
 	rawdb.WriteBlock(bc.db, b)
-
+	bc.lock.Unlock()
 	bc.logger.Log("msg", "Block saved to the kv store", "hash", b.Hash(), "height", b.Height().String(), "txs", len(b.Transactions()))
 
 	// Also store the block header separately.

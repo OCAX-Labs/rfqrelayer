@@ -103,12 +103,10 @@ func (s *Server) handleGetBlock(c echo.Context) error {
 	height, err := strconv.Atoi(hashOrID)
 	if err == nil {
 		fmt.Println("height", height)
-		// block, err := s.bc.GetBlock(uint64(height))
-		// if err != nil {
-		// 	return c.JSON(http.StatusBadRequest, APIError{Error: err.Error()})
-		// }
-
-		block := &types.Block{}
+		block, err := s.bc.GetBlock(big.NewInt(int64(height)))
+		if err != nil {
+			return c.JSON(http.StatusBadRequest, APIError{Error: err.Error()})
+		}
 
 		return c.JSON(http.StatusOK, intoJSONBlock(block))
 	}

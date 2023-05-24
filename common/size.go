@@ -23,8 +23,13 @@ func (s StorageSize) String() string {
 	}
 }
 
-// TerminalString implements log.TerminalStringer, formatting a string for console
-// output during logging.
+// TerminalString returns a human-readable string representation of the
+// storage size.
+// If the size is greater than 1TiB, the output will be in TiB.
+// If the size is greater than 1GiB, the output will be in GiB.
+// If the size is greater than 1MiB, the output will be in MiB.
+// If the size is greater than 1KiB, the output will be in KiB.
+// Otherwise, the output will be in B.
 func (s StorageSize) TerminalString() string {
 	if s > 1099511627776 {
 		return fmt.Sprintf("%.2fTiB", s/1099511627776)

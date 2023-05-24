@@ -13,7 +13,7 @@ func main() {
 
 	go localNode.Start()
 
-	remoteNode := makeServer("REMOTE_A", nil, ":4000", nil, "")
+	remoteNode := makeServer("REMOTE_A", nil, ":4000", nil, ":9998")
 	go remoteNode.Start()
 
 	// remoteNodeB := makeServer("REMOTE_B", nil, ":5000", nil, "")

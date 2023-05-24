@@ -160,15 +160,6 @@ func (tx *Transaction) RawSignatureValues() (v, r, s *big.Int) {
 	return tx.inner.rawSignatureValues()
 }
 
-// func (tx *Transaction) ByteSignatureValues() []byte {
-// 	_, r, s := tx.inner.rawSignatureValues()
-
-// 	signature := append(r.Bytes(), s.Bytes()...)
-
-// 	return signature
-
-// }
-
 // Hash returns the transaction hash.
 func (tx *Transaction) Hash() common.Hash {
 	if hash := tx.hash.Load(); hash != nil {
@@ -184,7 +175,6 @@ func (tx *Transaction) Hash() common.Hash {
 		r,
 		s,
 	})
-	// h := prefixedRlpHash(tx.Type(), tx.inner)
 	tx.hash.Store(h)
 	return h
 }
@@ -230,7 +220,6 @@ func (s Transactions) EncodeIndex(i int, w *bytes.Buffer) {
 	tx.encodeTyped(w)
 }
 
-// // Transactions impleme
 func (tx *Transaction) Sign(privKey cryptoocax.PrivateKey) (*Transaction, error) {
 	sig, err := privKey.Sign(tx.Hash().Bytes())
 	if err != nil {
@@ -290,14 +279,6 @@ func (tx *Transaction) Verify() error {
 	return nil
 }
 
-// func (tx *Transaction) Decode(dec Decoder[*Transaction]) error {
-// 	return dec.Decode(tx)
-// }
-
-// func (tx *Transaction) Encode(enc Encoder[*Transaction]) error {
-// 	return enc.Encode(tx)
-// }
-
 // copyAddressPtr copies an address.
 func copyAddressPtr(a *common.Address) *common.Address {
 	if a == nil {
@@ -306,14 +287,3 @@ func copyAddressPtr(a *common.Address) *common.Address {
 	cpy := *a
 	return &cpy
 }
-
-// Len returns the length of s.
-// func (s types.Transactions) Len() int { return len(s) }
-
-// EncodeIndex encodes the i'th transaction to w. Note that this does not check for errors
-// because we assume that *Transaction will only ever contain valid txs that were either
-// constructed by decoding or via public API in this package.
-// func (s types.Transactions) EncodeIndex(i int, w *bytes.Buffer) {
-// 	tx := s[i]
-// 	tx.encodeTyped(w)
-// }

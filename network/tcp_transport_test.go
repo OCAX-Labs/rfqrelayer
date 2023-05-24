@@ -10,18 +10,20 @@ import (
 )
 
 func TestConnect(t *testing.T) {
+	id := "testNode"
 	peerCh := make(chan *TCPPeer)
 	rpcCh := make(chan RPC)
-	tr := NewTCPTransport(":3000", peerCh, rpcCh)
+	tr := NewTCPTransport(id, ":3000", peerCh, rpcCh)
 
 	assert.Equal(t, tr.listenAddr, ":3000")
 }
 
 // Test TCPTransport Start() and Stop()
 func TestTCPTransportStartStop(t *testing.T) {
+	id := "testNode"
 	peerCh := make(chan *TCPPeer)
 	rpcCh := make(chan RPC)
-	transport := NewTCPTransport("localhost:8081", peerCh, rpcCh)
+	transport := NewTCPTransport(id, "localhost:8081", peerCh, rpcCh)
 
 	err := transport.Start()
 	if err != nil {
@@ -56,9 +58,10 @@ func TestTCPTransportStartStop(t *testing.T) {
 
 // TestAddingAndRemovingAPeer
 func TestAddingAndRemovingAPeer(t *testing.T) {
+	id := "testNode"
 	peerCh := make(chan *TCPPeer)
 	rpcCh := make(chan RPC)
-	transport := NewTCPTransport("localhost:8082", peerCh, rpcCh)
+	transport := NewTCPTransport(id, "localhost:8082", peerCh, rpcCh)
 
 	err := transport.Start()
 	if err != nil {
@@ -94,9 +97,10 @@ func TestAddingAndRemovingAPeer(t *testing.T) {
 
 // TestReadingAndWritingToRPCChannel
 func TestReadingAndWritingToRPCChannel(t *testing.T) {
+	id := "testNode"
 	peerCh := make(chan *TCPPeer)
 	rpcCh := make(chan RPC, 256) // Buffered channel for easier testing
-	transport := NewTCPTransport("localhost:4001", peerCh, rpcCh)
+	transport := NewTCPTransport(id, "localhost:4001", peerCh, rpcCh)
 
 	err := transport.Start()
 	if err != nil {

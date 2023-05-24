@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"math/big"
 	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -31,7 +32,8 @@ const (
 var testKey = cryptoocax.GeneratePrivateKey()
 
 func TestAddBlock(t *testing.T) {
-	bc := newBlockchainWithGenesis(t, dbPath)
+	bc, teardown := newBlockchainWithGenesis(t, dbPath+"addblock")
+	defer teardown()
 	lenBlocks := 10
 	for i := 0; i < lenBlocks; i++ {
 		prevBlHash := getPrevBlockHash(t, bc, big.NewInt(int64(i)))
@@ -50,8 +52,9 @@ func TestAddBlock(t *testing.T) {
 
 func TestNewBlockchain(t *testing.T) {
 	// Delete the database directory if it exists
-
-	bc := newBlockchainWithGenesis(t, dbPath)
+	cleanDb(t, dbPath+"newblockchain")
+	bc, teardown := newBlockchainWithGenesis(t, dbPath+"newblockchain")
+	defer teardown()
 	lenBlocks := 2
 	for i := 0; i < lenBlocks; i++ {
 		prevBlHash := getPrevBlockHash(t, bc, big.NewInt(int64(i)))
@@ -134,7 +137,8 @@ func transactionsEqual(t *testing.T, expected, actual *types.Transaction) {
 func TestHasBlock(t *testing.T) {
 	// Delete the database directory if it exists
 
-	bc := newBlockchainWithGenesis(t, dbPath)
+	bc, teardown := newBlockchainWithGenesis(t, dbPath+"hasblock")
+	defer teardown()
 
 	assert.True(t, bc.HasBlock(big.NewInt(0)))
 	assert.False(t, bc.HasBlock(big.NewInt(1)))
@@ -145,7 +149,8 @@ func TestHasBlock(t *testing.T) {
 
 func TestGetBlock(t *testing.T) {
 
-	bc := newBlockchainWithGenesis(t, dbPath)
+	bc, teardown := newBlockchainWithGenesis(t, dbPath+"getblock")
+	defer teardown()
 	assert.Equal(t, big.NewInt(0), bc.Height())
 	assert.Equal(t, bc.headers[0].Height.Uint64(), uint64(0))
 	b, err := bc.GetBlock(big.NewInt(0))
@@ -173,7 +178,8 @@ func TestGetBlock(t *testing.T) {
 
 func TestGetHeader(t *testing.T) {
 	// Delete the database directory if it exists
-	bc := newBlockchainWithGenesis(t, dbPath)
+	bc, teardown := newBlockchainWithGenesis(t, dbPath+"getheader")
+	defer teardown()
 	lenBlocks := 3
 
 	for i := 0; i < lenBlocks; i++ {
@@ -189,19 +195,21 @@ func TestGetHeader(t *testing.T) {
 }
 
 func TestAddBlockToHigh(t *testing.T) {
-	bc := newBlockchainWithGenesis(t, dbPath)
+	bc, teardown := newBlockchainWithGenesis(t, dbPath+"addblocktohigh")
+	defer teardown()
 
-	assert.Nil(t, bc.VerifyBlock(randomBlockWithSignature(t, testKey, 1, getPrevBlockHash(t, bc, big.NewInt(int64(1))))))
+	assert.Nil(t, bc.VerifyBlock(randomBlockWithSignature(t, testKey, 1, getPrevBlockHash(t, bc, big.NewInt(int64(0))))))
 	assert.NotNil(t, bc.VerifyBlock(randomBlockWithSignature(t, testKey, 3, common.Hash{})))
 }
 
-func newBlockchainWithGenesis(t *testing.T, dbPath string) *Blockchain {
+func newBlockchainWithGenesis(t *testing.T, dbPath string) (*Blockchain, func()) {
 	// Create the database
-	db, _ := setupDB(t)
-	// defer teardown()
+	cleanDb(t, dbPath)
+	db, teardown := setupDB(t, dbPath)
+	defer teardown()
 	bc, err := NewBlockchain(log.NewNopLogger(), randomBlockWithSignature(t, testKey, 0, common.Hash{}), db, true)
 	assert.Nil(t, err)
-	return bc
+	return bc, teardown
 }
 
 func getPrevBlockHash(t *testing.T, bc *Blockchain, height *big.Int) common.Hash {
@@ -287,7 +295,24 @@ func randomBlockWithSignature(t *testing.T, pk cryptoocax.PrivateKey, height uin
 	return b
 }
 
-func setupDB(t *testing.T) (db *pebble.Database, teardown func()) {
+func removeTestDB() {
+	// Get a list of all files in the current directoryA
+	matches, err := filepath.Glob(filepath.Join("../", ".testdb*"))
+	if err != nil {
+		panic(err)
+	}
+
+	// Iterate over each file that matches the pattern
+	for _, file := range matches {
+		// Remove the file or directory (os.RemoveAll behaves like `rm -rf`)
+		err = os.RemoveAll(file)
+		if err != nil {
+			panic(err)
+		}
+	}
+}
+
+func setupDB(t *testing.T, dbPath string) (db *pebble.Database, teardown func()) {
 	// Create the database
 	cleanDb(t, dbPath)
 
@@ -297,6 +322,11 @@ func setupDB(t *testing.T) (db *pebble.Database, teardown func()) {
 	}
 	// Return the database and the teardown function
 	return db, func() {
-		db.Close()
+		// Close the database first
+		if err := db.Close(); err != nil {
+			t.Fatal(err)
+		}
+		// Then remove the database files
+		removeTestDB()
 	}
 }

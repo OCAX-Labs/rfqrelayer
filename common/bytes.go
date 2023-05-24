@@ -7,8 +7,7 @@ import (
 	"github.com/ethereum/go-ethereum/common/hexutil"
 )
 
-// FromHex returns the bytes represented by the hexadecimal string s.
-// s may be prefixed with "0x".
+// FromHex converts a hex string to bytes.
 func FromHex(s string) []byte {
 	if has0xPrefix(s) {
 		s = s[2:]

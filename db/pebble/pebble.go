@@ -14,6 +14,7 @@ import (
 	"github.com/OCAX-labs/rfqrelayer/db"
 	"github.com/cockroachdb/pebble"
 	"github.com/cockroachdb/pebble/bloom"
+	"github.com/ethereum/go-ethereum/metrics"
 
 	// "github.com/ethereum/go-ethereum/metrics"
 	"github.com/go-kit/log"
@@ -42,19 +43,19 @@ type Database struct {
 	fn string     // filename for reporting
 	db *pebble.DB // Underlying pebble storage engine
 
-	// compTimeMeter       metrics.Meter // Meter for measuring the total time spent in database compaction
-	// compReadMeter       metrics.Meter // Meter for measuring the data read during compaction
-	// compWriteMeter      metrics.Meter // Meter for measuring the data written during compaction
-	// writeDelayNMeter    metrics.Meter // Meter for measuring the write delay number due to database compaction
-	// writeDelayMeter     metrics.Meter // Meter for measuring the write delay duration due to database compaction
-	// diskSizeGauge       metrics.Gauge // Gauge for tracking the size of all the levels in the database
-	// diskReadMeter       metrics.Meter // Meter for measuring the effective amount of data read
-	// diskWriteMeter      metrics.Meter // Meter for measuring the effective amount of data written
-	// memCompGauge        metrics.Gauge // Gauge for tracking the number of memory compaction
-	// level0CompGauge     metrics.Gauge // Gauge for tracking the number of table compaction in level0
-	// nonlevel0CompGauge  metrics.Gauge // Gauge for tracking the number of table compaction in non0 level
-	// seekCompGauge       metrics.Gauge // Gauge for tracking the number of table compaction caused by read opt
-	// manualMemAllocGauge metrics.Gauge // Gauge for tracking amount of non-managed memory currently allocated
+	compTimeMeter       metrics.Meter // Meter for measuring the total time spent in database compaction
+	compReadMeter       metrics.Meter // Meter for measuring the data read during compaction
+	compWriteMeter      metrics.Meter // Meter for measuring the data written during compaction
+	writeDelayNMeter    metrics.Meter // Meter for measuring the write delay number due to database compaction
+	writeDelayMeter     metrics.Meter // Meter for measuring the write delay duration due to database compaction
+	diskSizeGauge       metrics.Gauge // Gauge for tracking the size of all the levels in the database
+	diskReadMeter       metrics.Meter // Meter for measuring the effective amount of data read
+	diskWriteMeter      metrics.Meter // Meter for measuring the effective amount of data written
+	memCompGauge        metrics.Gauge // Gauge for tracking the number of memory compaction
+	level0CompGauge     metrics.Gauge // Gauge for tracking the number of table compaction in level0
+	nonlevel0CompGauge  metrics.Gauge // Gauge for tracking the number of table compaction in non0 level
+	seekCompGauge       metrics.Gauge // Gauge for tracking the number of table compaction caused by read opt
+	manualMemAllocGauge metrics.Gauge // Gauge for tracking amount of non-managed memory currently allocated
 
 	quitLock sync.Mutex      // Mutex protecting the quit channel access
 	quitChan chan chan error // Quit channel to stop the metrics collection before closing the database
@@ -131,9 +132,9 @@ func New(file string, cache int, handles int, namespace string, readonly bool) (
 		memTableSize = maxMemTableSize
 	}
 	db := &Database{
-		fn:       file,
-		log:      logger,
-		quitChan: make(chan chan error),
+		fn:  file,
+		log: logger,
+		// quitChan: make(chan chan error),
 	}
 	opt := &pebble.Options{
 		// Pebble has a single combined cache area and the write
@@ -218,7 +219,9 @@ func (d *Database) Close() error {
 	}
 	errc := make(chan error)
 	d.quitChan <- errc
-	if err := <-errc; err != nil {
+	err := <-errc
+	close(d.quitChan)
+	if err != nil {
 		level.Error(d.log).Log("err", err)
 	}
 	d.quitChan = nil
@@ -393,96 +396,96 @@ func (d *Database) Path() string {
 
 // meter periodically retrieves internal pebble counters and reports them to
 // the metrics subsystem.
-// func (d *PebbleDatabase) meter(refresh time.Duration) {
-// 	var errc chan error
-// 	timer := time.NewTimer(refresh)
-// 	defer timer.Stop()
+func (d *Database) meter(refresh time.Duration) {
+	var errc chan error
+	timer := time.NewTimer(refresh)
+	defer timer.Stop()
 
-// 	// Create storage and warning log tracer for write delay.
-// 	var (
-// 		compTimes        [2]int64
-// 		writeDelayTimes  [2]int64
-// 		writeDelayCounts [2]int64
-// 		compWrites       [2]int64
-// 		compReads        [2]int64
+	// Create storage and warning log tracer for write delay.
+	var (
+		compTimes        [2]int64
+		writeDelayTimes  [2]int64
+		writeDelayCounts [2]int64
+		compWrites       [2]int64
+		compReads        [2]int64
 
-// 		nWrites [2]int64
-// 	)
+		nWrites [2]int64
+	)
 
-// 	// Iterate ad infinitum and collect the stats
-// 	for i := 1; errc == nil; i++ {
-// 		var (
-// 			compWrite int64
-// 			compRead  int64
-// 			nWrite    int64
+	// Iterate ad infinitum and collect the stats
+	for i := 1; errc == nil; i++ {
+		var (
+			compWrite int64
+			compRead  int64
+			nWrite    int64
 
-// 			metrics            = d.db.Metrics()
-// 			compTime           = d.compTime.Load()
-// 			writeDelayCount    = d.writeDelayCount.Load()
-// 			writeDelayTime     = d.writeDelayTime.Load()
-// 			nonLevel0CompCount = int64(d.nonLevel0Comp.Load())
-// 			level0CompCount    = int64(d.level0Comp.Load())
-// 		)
-// 		writeDelayTimes[i%2] = writeDelayTime
-// 		writeDelayCounts[i%2] = writeDelayCount
-// 		compTimes[i%2] = compTime
+			metrics            = d.db.Metrics()
+			compTime           = d.compTime.Load()
+			writeDelayCount    = d.writeDelayCount.Load()
+			writeDelayTime     = d.writeDelayTime.Load()
+			nonLevel0CompCount = int64(d.nonLevel0Comp.Load())
+			level0CompCount    = int64(d.level0Comp.Load())
+		)
+		writeDelayTimes[i%2] = writeDelayTime
+		writeDelayCounts[i%2] = writeDelayCount
+		compTimes[i%2] = compTime
 
-// 		for _, levelMetrics := range metrics.Levels {
-// 			nWrite += int64(levelMetrics.BytesCompacted)
-// 			nWrite += int64(levelMetrics.BytesFlushed)
-// 			compWrite += int64(levelMetrics.BytesCompacted)
-// 			compRead += int64(levelMetrics.BytesRead)
-// 		}
+		for _, levelMetrics := range metrics.Levels {
+			nWrite += int64(levelMetrics.BytesCompacted)
+			nWrite += int64(levelMetrics.BytesFlushed)
+			compWrite += int64(levelMetrics.BytesCompacted)
+			compRead += int64(levelMetrics.BytesRead)
+		}
 
-// 		nWrite += int64(metrics.WAL.BytesWritten)
+		nWrite += int64(metrics.WAL.BytesWritten)
 
-// 		compWrites[i%2] = compWrite
-// 		compReads[i%2] = compRead
-// 		nWrites[i%2] = nWrite
+		compWrites[i%2] = compWrite
+		compReads[i%2] = compRead
+		nWrites[i%2] = nWrite
 
-// 		if d.writeDelayNMeter != nil {
-// 			d.writeDelayNMeter.Mark(writeDelayCounts[i%2] - writeDelayCounts[(i-1)%2])
-// 		}
-// 		if d.writeDelayMeter != nil {
-// 			d.writeDelayMeter.Mark(writeDelayTimes[i%2] - writeDelayTimes[(i-1)%2])
-// 		}
-// 		if d.compTimeMeter != nil {
-// 			d.compTimeMeter.Mark(compTimes[i%2] - compTimes[(i-1)%2])
-// 		}
-// 		if d.compReadMeter != nil {
-// 			d.compReadMeter.Mark(compReads[i%2] - compReads[(i-1)%2])
-// 		}
-// 		if d.compWriteMeter != nil {
-// 			d.compWriteMeter.Mark(compWrites[i%2] - compWrites[(i-1)%2])
-// 		}
-// 		if d.diskSizeGauge != nil {
-// 			d.diskSizeGauge.Update(int64(metrics.DiskSpaceUsage()))
-// 		}
-// 		if d.diskReadMeter != nil {
-// 			d.diskReadMeter.Mark(0) // pebble doesn't track non-compaction reads
-// 		}
-// 		if d.diskWriteMeter != nil {
-// 			d.diskWriteMeter.Mark(nWrites[i%2] - nWrites[(i-1)%2])
-// 		}
-// 		// See https://github.com/cockroachdb/pebble/pull/1628#pullrequestreview-1026664054
-// 		manuallyAllocated := metrics.BlockCache.Size + int64(metrics.MemTable.Size) + int64(metrics.MemTable.ZombieSize)
-// 		d.manualMemAllocGauge.Update(manuallyAllocated)
-// 		d.memCompGauge.Update(metrics.Flush.Count)
-// 		d.nonlevel0CompGauge.Update(nonLevel0CompCount)
-// 		d.level0CompGauge.Update(level0CompCount)
-// 		d.seekCompGauge.Update(metrics.Compact.ReadCount)
+		if d.writeDelayNMeter != nil {
+			d.writeDelayNMeter.Mark(writeDelayCounts[i%2] - writeDelayCounts[(i-1)%2])
+		}
+		if d.writeDelayMeter != nil {
+			d.writeDelayMeter.Mark(writeDelayTimes[i%2] - writeDelayTimes[(i-1)%2])
+		}
+		if d.compTimeMeter != nil {
+			d.compTimeMeter.Mark(compTimes[i%2] - compTimes[(i-1)%2])
+		}
+		if d.compReadMeter != nil {
+			d.compReadMeter.Mark(compReads[i%2] - compReads[(i-1)%2])
+		}
+		if d.compWriteMeter != nil {
+			d.compWriteMeter.Mark(compWrites[i%2] - compWrites[(i-1)%2])
+		}
+		if d.diskSizeGauge != nil {
+			d.diskSizeGauge.Update(int64(metrics.DiskSpaceUsage()))
+		}
+		if d.diskReadMeter != nil {
+			d.diskReadMeter.Mark(0) // pebble doesn't track non-compaction reads
+		}
+		if d.diskWriteMeter != nil {
+			d.diskWriteMeter.Mark(nWrites[i%2] - nWrites[(i-1)%2])
+		}
+		// See https://github.com/cockroachdb/pebble/pull/1628#pullrequestreview-1026664054
+		manuallyAllocated := metrics.BlockCache.Size + int64(metrics.MemTable.Size) + int64(metrics.MemTable.ZombieSize)
+		d.manualMemAllocGauge.Update(manuallyAllocated)
+		d.memCompGauge.Update(metrics.Flush.Count)
+		d.nonlevel0CompGauge.Update(nonLevel0CompCount)
+		d.level0CompGauge.Update(level0CompCount)
+		d.seekCompGauge.Update(metrics.Compact.ReadCount)
 
-// 		// Sleep a bit, then repeat the stats collection
-// 		select {
-// 		case errc = <-d.quitChan:
-// 			// Quit requesting, stop hammering the database
-// 		case <-timer.C:
-// 			timer.Reset(refresh)
-// 			// Timeout, gather a new set of stats
-// 		}
-// 	}
-// 	errc <- nil
-// }
+		// Sleep a bit, then repeat the stats collection
+		select {
+		case errc = <-d.quitChan:
+			// Quit requesting, stop hammering the database
+		case <-timer.C:
+			timer.Reset(refresh)
+			// Timeout, gather a new set of stats
+		}
+	}
+	errc <- nil
+}
 
 // batch is a write-only batch that commits changes to its host database
 // when Write is called. A batch cannot be used concurrently.

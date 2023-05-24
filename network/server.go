@@ -43,6 +43,8 @@ var (
 	White  = "\033[97m"
 )
 
+// Server is the main entry point into the node.
+
 type ServerOptions struct {
 	APIListenAddr string
 	SeedNodes     []string
@@ -76,7 +78,7 @@ type Server struct {
 }
 
 func NewServer(options ServerOptions) (*Server, error) {
-	if options.BlockTime == time.Duration(0) {
+	if options.BlockTime == 0 {
 		options.BlockTime = defaultBlockTime
 	}
 	if options.RPCDecodeFunc == nil {
