@@ -2,6 +2,7 @@ package types
 
 import (
 	"bytes"
+	"crypto/rand"
 	"math/big"
 	"testing"
 	"time"
@@ -56,7 +57,7 @@ func TestAddTransaction(t *testing.T) {
 
 	tx := NewTx(&RFQRequest{
 		From: from,
-		Data: []byte("Hello, world!"),
+		Data: *randomRFQ(t),
 	})
 
 	block.AddTransaction(tx)
@@ -142,7 +143,7 @@ func TestBodyEncodeDecode(t *testing.T) {
 	privKey := cryptoocax.GeneratePrivateKey()
 	tx1 := NewTx(&RFQRequest{
 		From: privKey.PublicKey().Address(),
-		Data: []byte("Hello, world!"),
+		Data: *randomRFQ(t),
 	})
 
 	body := &Body{
@@ -174,7 +175,7 @@ func TestBlockEncodeDecodeWithTransactions(t *testing.T) {
 
 	transaction := NewTx(&RFQRequest{
 		From: from,
-		Data: []byte("Hello, world!"),
+		Data: *randomRFQ(t),
 	})
 	txs := Transactions{transaction, transaction}
 	// txs := Transactions{}
@@ -237,4 +238,29 @@ func randomBlock(t *testing.T, height int64, prevBlockhash common.Hash, key cryp
 	assert.Nil(t, b.Sign(key))
 
 	return b
+}
+
+func randomRFQ(t *testing.T) *SignableRFQData {
+	// generate a random number to be used as the requestor id
+	rand, err := rand.Int(rand.Reader, big.NewInt(100000000))
+	assert.Nil(t, err)
+
+	// Create an instance of SignableRFQData
+	signableData := SignableRFQData{
+		RequestorId:     "119",
+		BaseTokenAmount: rand.String(),
+		BaseToken: BaseToken{
+			Address:  common.HexToAddress("0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"),
+			Symbol:   "VFG",
+			Decimals: 18,
+		},
+		QuoteToken: QuoteToken{
+			Address:  common.HexToAddress("0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"),
+			Symbol:   "USDC",
+			Decimals: 6,
+		},
+		RFQDurationMs: 60000,
+	}
+
+	return &signableData
 }

@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"math/big"
-	"math/rand"
 	"testing"
 
 	"github.com/OCAX-labs/rfqrelayer/common"
@@ -18,15 +17,22 @@ func TestTransaction(t *testing.T) {
 	privateKey := cryptoocax.GeneratePrivateKey()
 	pubKey := privateKey.PublicKey()
 	from := pubKey.Address()
+	data := *randomRFQ(t)
 	inner := &RFQRequest{
 		From: from,
-		Data: []byte("Hello, world!"),
+		Data: data,
 	}
 
 	tx := NewTx(inner)
 	assert.Equal(t, from, *tx.inner.from())
-	assert.Equal(t, []byte("Hello, world!"), tx.inner.data())
 	// 0x00 is the type ID for RFQRequestTxType
+	dataBytes := tx.inner.data()
+	var dataRfq SignableRFQData
+	err := json.Unmarshal(dataBytes, &dataRfq)
+	assert.Nil(t, err)
+
+	assert.Equal(t, data.RequestorId, dataRfq.RequestorId)
+
 	assert.Equal(t, uint8(0x00), tx.inner.txType())
 
 	signedTx, err := tx.Sign(privateKey)
@@ -36,7 +42,7 @@ func TestTransaction(t *testing.T) {
 	assert.Nil(t, err)
 	assert.NotNil(t, signedTx)
 	assert.Equal(t, &from, signedTx.inner.from())
-	assert.Equal(t, []byte("Hello, world!"), signedTx.inner.data())
+	// assert.Equal(t, []byte("Hello, world!"), signedTx.inner.data())
 	r, s, v := signedTx.inner.rawSignatureValues()
 	assert.NotNil(t, r)
 	assert.NotNil(t, s)
@@ -48,11 +54,11 @@ func TestSignTransaction(t *testing.T) {
 	from := key.PublicKey().Address()
 
 	// prepare Signer
-	data := []byte("foobar")
+	// data := []byte("foobar")
 
 	txData := &RFQRequest{
 		From: from,
-		Data: data,
+		Data: *randomRFQ(t),
 	}
 
 	tx := NewTx(txData)
@@ -69,7 +75,7 @@ func TestVerifyTransaction(t *testing.T) {
 
 	from := pubKey.Address()
 	// signer := NewSigner()
-	data := []byte("foobar")
+	data := *randomRFQ(t)
 
 	txData := &RFQRequest{
 		From: from,
@@ -94,7 +100,7 @@ func TestVerifyTransaction(t *testing.T) {
 func TestRFQRequestEncodeDecode(t *testing.T) {
 	req := &RFQRequest{
 		From: common.Address{},
-		Data: []byte("Hello, world!"),
+		Data: *randomRFQ(t),
 		V:    big.NewInt(1),
 		R:    big.NewInt(1),
 		S:    big.NewInt(1),
@@ -128,7 +134,7 @@ func TestTransactionEncodeDecode(t *testing.T) {
 
 	txData := &RFQRequest{
 		From: from,
-		Data: []byte("Hello, world!"),
+		Data: *randomRFQ(t),
 	}
 
 	tx, err := SignNewTx(&privateKey, signer, txData)
@@ -239,7 +245,7 @@ func randomTxWithSignature(t *testing.T, key cryptoocax.PrivateKey) *Transaction
 	from := pubKey.Address()
 	inner := &RFQRequest{
 		From: from,
-		Data: []byte(fmt.Sprintf("random tx %d", rand.Int63())),
+		Data: *randomRFQ(t),
 	}
 
 	tx := NewTx(inner)

@@ -3,7 +3,6 @@ package core
 import (
 	"bytes"
 	"crypto/rand"
-	"fmt"
 	"math/big"
 	"os"
 	"path/filepath"
@@ -244,13 +243,15 @@ func RandomHash() common.Hash {
 // NewRandomTransaction return a new random transaction without signature.
 func randomTx(pubKey cryptoocax.PublicKey) *types.Transaction {
 	from := pubKey.Address()
-	rand, err := rand.Int(rand.Reader, big.NewInt(100000000))
-	if err != nil {
-		panic(err)
-	}
+	// rand, err := rand.Int(rand.Reader, big.NewInt(100000000))
+	// rand, err := rand.Int(rand.Reader, big.NewInt(100000000))	// if err != nil {
+	// 	panic(err)
+	// }
+	data := types.SignableRFQData{}
+
 	inner := &types.RFQRequest{
 		From: from,
-		Data: []byte(fmt.Sprintf("random tx %d", rand.Uint64())),
+		Data: data,
 	}
 
 	tx := types.NewTx(inner)

@@ -224,9 +224,20 @@ free:
 			// }
 
 		case tx := <-s.txChan:
+			fmt.Printf("XXXX Received tx [%+v]\n", tx)
 			if err := s.processTransaction(tx); err != nil {
 				s.Logger.Log("TX err", err)
 			}
+
+			// if rfq, ok := tx.(*RFQRequest); ok {
+			// 	fmt.Println(rfq.DataString())
+			// } else {
+			// 	// handle the case where txData is not an *RFQRequest
+			// }
+
+			// // if err != nil {
+			// 	return err
+			// }
 
 			s.Logger.Log("msg", "new transaction received", "tx", tx)
 		case rpc := <-s.rpcCh:
@@ -338,19 +349,19 @@ func (s *Server) processGetBlocksMessage(from net.Addr, data *GetBlocksMessage) 
 	return nil
 }
 
-func (s *Server) sendGetStatusMessage(peer *TCPPeer) error {
-	var (
-		getStatusMsg = new(GetStatusMessage)
-		buf          = new(bytes.Buffer)
-	)
+// func (s *Server) sendGetStatusMessage(peer *TCPPeer) error {
+// 	var (
+// 		getStatusMsg = new(GetStatusMessage)
+// 		buf          = new(bytes.Buffer)
+// 	)
 
-	if err := gob.NewEncoder(buf).Encode(getStatusMsg); err != nil {
-		return err
-	}
+// 	if err := gob.NewEncoder(buf).Encode(getStatusMsg); err != nil {
+// 		return err
+// 	}
 
-	msg := NewMessage(MessageTypeGetStatus, buf.Bytes(), s.ID)
-	return peer.Send(msg)
-}
+// 	msg := NewMessage(MessageTypeGetStatus, buf.Bytes(), s.ID)
+// 	return peer.Send(msg)
+// }
 
 func (s *Server) broadcast(payload []byte) error {
 	s.mu.RLock()
@@ -477,15 +488,15 @@ func (s *Server) processTransaction(tx *types.Transaction) error {
 		return nil
 	}
 
-	// if err := tx.Verify(); err != nil {
-	// 	return err
-	// }
+	if err := tx.Verify(); err != nil {
+		return err
+	}
 
-	// s.Logger.Log(
-	// 	"msg", "added new tx to pool",
-	// 	"hash", hash,
-	// 	"mempool len", s.memPool.PendingCount(),
-	// )
+	s.Logger.Log(
+		"msg", "added new tx to pool",
+		"hash", hash,
+		"mempool len", s.memPool.PendingCount(),
+	)
 
 	go s.broadcastTx(tx)
 
@@ -498,6 +509,8 @@ func (s *Server) requestBlocksLoop(peer net.Addr, blocksIndex int64) error {
 	ticker := time.NewTicker(6 * time.Second)
 
 	for {
+		fmt.Printf("block height before request: %d\n", s.chain.Height())
+		fmt.Printf("requesting blocksIndex: %d\n", blocksIndex)
 		headersLength := len(s.chain.Headers())
 		// blocksIndex := int64(headersLength)
 		if headersLength >= int(blocksIndex) {

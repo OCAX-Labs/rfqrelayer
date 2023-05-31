@@ -7,26 +7,26 @@ import (
 )
 
 type RfqData struct {
-	RequestorID string `json:"requestor_id"`
+	RequestorID string `json:"requestorId"`
 
 	// the token contract address and details for the token the trader is selling
-	BaseTokenAddr     string `json:"base_token_address,omitempty"`
-	BaseTokenSymbol   string `json:"base_token_symbol"`
-	BaseTokenDecimals int    `json:"base_token_decimals,omitempty"`
+	BaseTokenAddr     string `json:"baseTokenAddress,omitempty"`
+	BaseTokenSymbol   string `json:"baseTokenSymbol"`
+	BaseTokenDecimals int    `json:"baseTokenDecimals,omitempty"`
 
 	// empty if the trader is buying, otherwise the amount of base token the trader is selling
-	BaseTokenAmount string `json:"base_token_amount,omitempty"`
+	BaseTokenAmount string `json:"baseTokenAmount,omitempty"`
 
 	// the token contract and details for the token the trader is buying
-	QuoteTokenAddr     string `json:"quote_token_address,omitempty"`
-	QuoteTokenSymbol   string `json:"quote_token_symbol"`
-	QuoteTokenDecimals int    `json:"quote_token_decimals,omitempty"`
+	QuoteTokenAddr     string `json:"quoteTokenAddress,omitempty"`
+	QuoteTokenSymbol   string `json:"quoteTokenSymbol"`
+	QuoteTokenDecimals int    `json:"quoteTokenDecimals,omitempty"`
 
 	// empty if the trader is selling, otherwise the amount of quote token the trader is buying
-	QuoteTokenAmount string `json:"quote_token_amount,omitempty"`
+	QuoteTokenAmount string `json:"quoteTokenAmount,omitempty"`
 
-	FeesBps   int       `json:"fees_bps,omitempty"`
-	RfqExpiry time.Time `json:"rfq_expiry,omitempty"`
+	FeesBps   int       `json:"feesBps,omitempty"`
+	RfqExpiry time.Time `json:"rfqExpiry,omitempty"`
 }
 
 type SecretShare struct {

@@ -168,12 +168,11 @@ func (tx *Transaction) Hash() common.Hash {
 
 	v, r, s := tx.inner.rawSignatureValues()
 
+	fmt.Printf("TxHash: from: %s, data: %s, v: %s, r: %s, s: %s\n", tx.inner.from().String(), string(tx.inner.data()), v.String(), r.String(), s.String())
+
 	h := rlpHash([]interface{}{
 		tx.inner.from(),
 		tx.inner.data(),
-		v,
-		r,
-		s,
 	})
 	tx.hash.Store(h)
 	return h
@@ -256,6 +255,7 @@ func (tx *Transaction) Verify() error {
 	}
 
 	hash := tx.Hash() // Calculate the transaction hash here.
+	fmt.Printf("hash: %+v\n", hash)
 	recoveredPubKey, err := cryptoocax.Ecrecover(hash.Bytes(), sig.ToBytes())
 	if err != nil {
 		return fmt.Errorf("failed to recover public key: %v", err)
@@ -267,6 +267,7 @@ func (tx *Transaction) Verify() error {
 	}
 
 	recoveredAddr := crypto.PubkeyToAddress(*pubKey)
+	fmt.Printf("recoveredAddr: %+v\n", recoveredAddr)
 	fromAddress := tx.inner.from()
 	if fromAddress == nil {
 		return fmt.Errorf("no from address")
@@ -277,6 +278,31 @@ func (tx *Transaction) Verify() error {
 	}
 
 	return nil
+}
+
+func (tx *Transaction) String() string {
+	v, r, s := tx.inner.rawSignatureValues()
+
+	dataString := "<unprintable>"
+	if stringer, ok := tx.inner.(fmt.Stringer); ok {
+		dataString = stringer.String()
+	}
+
+	return fmt.Sprintf(`Transaction{
+		Type: %d,
+		From: %s,
+		Data: %s,
+		V: %s,
+		R: %s,
+		S: %s
+	}`,
+		tx.inner.txType(),
+		tx.inner.from().String(),
+		dataString,
+		v.String(),
+		r.String(),
+		s.String(),
+	)
 }
 
 // copyAddressPtr copies an address.

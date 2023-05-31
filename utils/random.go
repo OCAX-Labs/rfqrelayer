@@ -1,10 +1,9 @@
 package utils
 
 import (
+	"crypto/rand"
 	"math/big"
-	"math/rand"
 
-	"fmt"
 	"testing"
 	"time"
 
@@ -29,12 +28,38 @@ func NewRandomTransaction(pubKey cryptoocax.PublicKey) *types.Transaction {
 	from := pubKey.Address()
 	inner := &types.RFQRequest{
 		From: from,
-		Data: []byte(fmt.Sprintf("random tx %d", rand.Int63())),
+		Data: *randomRFQ(),
 	}
 
 	tx := types.NewTx(inner)
 
 	return tx
+}
+
+func randomRFQ() *types.SignableRFQData {
+	// generate a random number to be used as the requestor id
+	rand, err := rand.Int(rand.Reader, big.NewInt(100000000))
+	if err != nil {
+		panic(err)
+	}
+	// Create an instance of SignableRFQData
+	signableData := types.SignableRFQData{
+		RequestorId:     "119",
+		BaseTokenAmount: rand.String(),
+		BaseToken: types.BaseToken{
+			Address:  common.HexToAddress("0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"),
+			Symbol:   "VFG",
+			Decimals: 18,
+		},
+		QuoteToken: types.QuoteToken{
+			Address:  common.HexToAddress("0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"),
+			Symbol:   "USDC",
+			Decimals: 6,
+		},
+		RFQDurationMs: 60000,
+	}
+
+	return &signableData
 }
 
 func NewRandomTransactionWithSignature(t *testing.T, privKey cryptoocax.PrivateKey) *types.Transaction {

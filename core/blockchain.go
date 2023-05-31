@@ -23,10 +23,12 @@ type ChainInterface interface {
 }
 
 type Blockchain struct {
-	logger  log.Logger
-	db      *pebble.Database
-	lock    sync.RWMutex
-	headers []*types.Header
+	logger   log.Logger
+	db       *pebble.Database
+	lock     sync.RWMutex
+	headers  []*types.Header
+	openRFQS []*types.RFQRequest
+
 	// blocks  []*Block
 	txStore map[common.Hash]*types.Transaction
 	// blockStore map[common.Hash]*Block
@@ -41,9 +43,10 @@ type Blockchain struct {
 
 func NewBlockchain(l log.Logger, genesis *types.Block, db *pebble.Database, validator bool) (*Blockchain, error) {
 	bc := &Blockchain{
-		headers: []*types.Header{},
-		db:      db,
-		logger:  l,
+		headers:  []*types.Header{},
+		db:       db,
+		logger:   l,
+		openRFQS: []*types.RFQRequest{},
 		// blockStore: make(map[common.Hash]*Block),
 		txStore: make(map[common.Hash]*types.Transaction),
 	}
@@ -207,10 +210,12 @@ func (bc *Blockchain) addBlockWithoutValidation(b *types.Block) error {
 
 	// bc.blockStore[b.Hash(BlockHasher{})] = b
 
-	// for _, tx := range b.Transactions() {
-	// 	// bc.txStore[tx.Hash(TxHasher{})] = tx
-	// 	// fmt .Printf("TODO: save these transactions in db: %+v\n", tx)
-	// }
+	for _, tx := range b.Transactions() {
+		rawdb.WriteTransaction(bc.db, tx)
+		fmt.Printf("TODO: save these transactions in db: %+v\n", tx)
+		// bc.txStore[tx.Hash()] = tx
+		// fmt.Printf("TODO: save these transactions in db: %+v\n", tx)
+	}
 
 	// bc.lock.Unlock()
 	bc.currentBlock.Store(b.Header())

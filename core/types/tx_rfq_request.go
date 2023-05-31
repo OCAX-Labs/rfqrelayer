@@ -1,6 +1,9 @@
 package types
 
 import (
+	"bytes"
+	"encoding/gob"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -10,17 +13,60 @@ import (
 	"github.com/ethereum/go-ethereum/rlp"
 )
 
-type RFQRequest struct {
-	From common.Address `json:"from" gencodec:"required"`
-	Data []byte
-	// Signature values
+type BaseToken struct {
+	Address  common.Address `json:"address"`
+	Symbol   string         `json:"symbol"`
+	Decimals int            `json:"decimals"`
+}
 
+func (b BaseToken) String() string {
+	return fmt.Sprintf("BaseToken{Address: %s, Symbol: %s, Decimals: %d}",
+		b.Address.Hex(),
+		b.Symbol,
+		b.Decimals)
+}
+
+type QuoteToken struct {
+	Address  common.Address `json:"address"`
+	Symbol   string         `json:"symbol"`
+	Decimals int            `json:"decimals"`
+}
+
+func (q QuoteToken) String() string {
+	return fmt.Sprintf("QuoteToken{Address: %s, Symbol: %s, Decimals: %d}",
+		q.Address.Hex(),
+		q.Symbol,
+		q.Decimals)
+}
+
+type SignableRFQData struct {
+	RequestorId     string     `json:"requestorId"`
+	BaseTokenAmount string     `json:"baseTokenAmount"`
+	BaseToken       BaseToken  `json:"baseToken"`
+	QuoteToken      QuoteToken `json:"quoteToken"`
+	RFQDurationMs   int64      `json:"rfqDurationMs"`
+}
+
+func (d SignableRFQData) String() string {
+	return fmt.Sprintf("SignableRFQData{RequestorId: %s, BaseTokenAmount: %s, BaseToken: %s, QuoteToken: %s, RFQDurationMs: %d}",
+		d.RequestorId,
+		d.BaseTokenAmount,
+		d.BaseToken.String(),
+		d.QuoteToken.String(),
+		d.RFQDurationMs)
+}
+
+type RFQRequest struct {
+	From common.Address  `json:"from" gencodec:"required"`
+	Data SignableRFQData `json:"data" gencodec:"required"`
+
+	// Signature values
 	V *big.Int `json:"v" gencodec:"required"`
 	R *big.Int `json:"r" gencodec:"required"`
 	S *big.Int `json:"s" gencodec:"required"`
 }
 
-func NewTransaction(from common.Address, data []byte) *RFQRequest {
+func NewTransaction(from common.Address, data SignableRFQData) *RFQRequest {
 
 	return &RFQRequest{
 		Data: data,
@@ -28,10 +74,19 @@ func NewTransaction(from common.Address, data []byte) *RFQRequest {
 	}
 }
 
+func (tx *RFQRequest) AddSignatureToTx(sig []byte) error {
+	if len(sig) != 65 {
+		return errors.New("invalid signature length")
+	}
+	tx.V = new(big.Int).SetBytes(sig[64:])
+	tx.R = new(big.Int).SetBytes(sig[:32])
+	tx.S = new(big.Int).SetBytes(sig[32:64])
+	return nil
+}
+
 func (tx *RFQRequest) copy() TxData {
 	cpy := &RFQRequest{
 		From: common.Address(common.CopyBytes(tx.From.Bytes())),
-		Data: common.CopyBytes(tx.Data),
 		// These are initialized below.
 		V: new(big.Int),
 		R: new(big.Int),
@@ -47,12 +102,29 @@ func (tx *RFQRequest) copy() TxData {
 	if tx.S != nil {
 		cpy.S.Set(tx.S)
 	}
+
+	// Deep copy the data.
+	dataFields, err := DeepCopy(tx.Data)
+	if err != nil {
+		panic(fmt.Sprintf("failed to deep copy tx data: %v", err))
+	}
+
+	cpy.Data = dataFields
+
 	return cpy
 }
 
 func (tx *RFQRequest) from() *common.Address { return &tx.From }
 func (tx *RFQRequest) txType() byte          { return RFQRequestTxType }
-func (tx *RFQRequest) data() []byte          { return tx.Data }
+
+func (tx *RFQRequest) data() []byte {
+	dataBytes, err := json.Marshal(tx.Data)
+	if err != nil {
+		panic(fmt.Sprintf("failed to marshal tx data: %v", err))
+	}
+	return dataBytes
+}
+
 func (tx *RFQRequest) rawSignatureValues() (v, r, s *big.Int) {
 	return tx.V, tx.R, tx.S
 }
@@ -61,7 +133,11 @@ func (tx *RFQRequest) setSignatureValues(v, r, s *big.Int) {
 }
 
 func (r *RFQRequest) EncodeRLP(w io.Writer) error {
-	return rlp.Encode(w, []interface{}{r.From.Bytes(), r.Data, r.V, r.R, r.S})
+	dataBytes, err := json.Marshal(r.Data)
+	if err != nil {
+		return err
+	}
+	return rlp.Encode(w, []interface{}{r.From.Bytes(), dataBytes, r.V, r.R, r.S})
 }
 
 func (r *RFQRequest) DecodeRLP(s *rlp.Stream) error {
@@ -85,10 +161,57 @@ func (r *RFQRequest) DecodeRLP(s *rlp.Stream) error {
 		return errors.New("invalid type for From")
 	}
 
-	r.Data, _ = elems[1].([]byte)
+	var data SignableRFQData
+	dataBytes, _ := elems[1].([]byte)
+	err = json.Unmarshal(dataBytes, &data)
+	if err != nil {
+		return err
+	}
+
+	r.Data = data
 	r.V, _ = elems[2].(*big.Int)
 	r.R, _ = elems[3].(*big.Int)
 	r.S, _ = elems[4].(*big.Int)
 
 	return nil
+}
+
+func (tx *RFQRequest) DataString() string {
+	dataBytes, err := json.MarshalIndent(tx.Data, "", "  ")
+	if err != nil {
+		// handle error here or return an error string
+		return "error in marshaling data"
+	}
+	return string(dataBytes)
+}
+
+func (tx *RFQRequest) String() string {
+	return fmt.Sprintf("RFQRequest{From: %s, Data: %s, V: %s, R: %s, S: %s}",
+		tx.From.Hex(),
+		tx.DataString(),
+		tx.V.String(),
+		tx.R.String(),
+		tx.S.String())
+}
+
+func DeepCopy(src SignableRFQData) (SignableRFQData, error) {
+	buf := new(bytes.Buffer)
+	enc := gob.NewEncoder(buf)
+	dec := gob.NewDecoder(buf)
+
+	err := enc.Encode(src)
+	if err != nil {
+		return SignableRFQData{}, err
+	}
+
+	var copy SignableRFQData
+	if err := dec.Decode(&copy); err != nil {
+		return SignableRFQData{}, err
+	}
+
+	return copy, nil
+}
+
+func init() {
+	gob.Register(SignableRFQData{})
 }

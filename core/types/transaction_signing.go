@@ -125,13 +125,19 @@ func (ts txSigner) Equal(s2 Signer) bool {
 	return ok
 }
 
+// SignatureValues parses a signature and returns the r, s, and v values.
+// The signature must be in the 65-byte [R || S || V] format.
+// r and s are zero-padded to 32 bytes.
+// v is 0 or 1.
+
 func (ts txSigner) SignatureValues(tx *Transaction, sig []byte) (r, s, v *big.Int, err error) {
 	if len(sig) != SignatureLength {
 		return nil, nil, nil, ErrInvalidSig
 	}
 	r = new(big.Int).SetBytes(sig[:32])
 	s = new(big.Int).SetBytes(sig[32:64])
-	v = new(big.Int).SetBytes([]byte{sig[64] + 27})
+	v = new(big.Int).SetBytes([]byte{sig[64]})
+	fmt.Printf("r : %+v s : %+v v : %+v \n", r, s, v)
 	return r, s, v, nil
 }
 

@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"encoding/binary"
 	"errors"
+	"fmt"
+	"math/big"
 	"sync"
 
 	"github.com/OCAX-labs/rfqrelayer/common"
@@ -70,6 +72,18 @@ func NewOcaxHasher() *OcaxHasher {
 // Reset resets the hasher to its initial state.
 func (h *OcaxHasher) Reset() {
 	h.hasher.Reset()
+}
+
+func ClientHash(from common.Address, data []byte, v, r, s *big.Int) common.Hash {
+	fmt.Printf("ClientHash: from: %s, data: %s, v: %s, r: %s, s: %s\n", from.String(), string(data), v.String(), r.String(), s.String())
+	h := rlpHash([]interface{}{
+		from,
+		data,
+		v,
+		r,
+		s,
+	})
+	return h
 }
 
 // Update updates the hash with a new key-value pair.

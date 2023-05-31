@@ -5,6 +5,7 @@ import (
 	"crypto/elliptic"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"math/big"
 
 	"github.com/OCAX-labs/rfqrelayer/common"
@@ -34,9 +35,17 @@ func (k PrivateKey) Sign(data []byte) (*Signature, error) {
 	}
 	r := new(big.Int).SetBytes(sig[:32])
 	s := new(big.Int).SetBytes(sig[32:64])
-	v := new(big.Int).SetUint64(uint64(sig[64]))
+	v := sig[64]
 
-	return &Signature{R: r, S: s, V: v}, nil
+	if v != 0 && v != 1 {
+		return nil, errors.New("invalid recovery id")
+	}
+	// Adjust the recovery id to be 27 or 28
+	// v += 27
+	vBigInt := new(big.Int).SetInt64(int64(v))
+	fmt.Println("vBigInt", vBigInt)
+
+	return &Signature{R: r, S: s, V: vBigInt}, nil
 }
 
 func GeneratePrivateKey() PrivateKey {
@@ -84,6 +93,10 @@ func (pk PublicKey) Verify(data []byte, sig Signature) bool {
 	return validate
 }
 
+func Keccak256Hash(data []byte) []byte {
+	return crypto.Keccak256(data)
+}
+
 type Signature struct {
 	V, R, S *big.Int
 }
@@ -95,14 +108,8 @@ func (sig *Signature) String() string {
 func (sig *Signature) ToBytes() []byte {
 	rBytes := sig.R.Bytes()
 	sBytes := sig.S.Bytes()
-	vBytes := sig.V.Bytes()
+	vByte := byte(sig.V.Int64())
 
-	// Ethereum v should only be a single byte.
-	if len(vBytes) > 1 {
-		panic("v value too large")
-	} else if len(vBytes) == 0 {
-		vBytes = []byte{0}
-	}
 	// Ensure R and S are 32 bytes long each
 	RBytesPadded := make([]byte, 32)
 	SBytesPadded := make([]byte, 32)
@@ -112,7 +119,7 @@ func (sig *Signature) ToBytes() []byte {
 
 	// Combine R, S and V
 	signature := append(RBytesPadded, SBytesPadded...)
-	signature = append(signature, vBytes...)
+	signature = append(signature, vByte)
 
 	return signature
 }
@@ -123,7 +130,7 @@ func DeserializeSig(sigBytes []byte) (*Signature, error) {
 	}
 	r := new(big.Int).SetBytes(sigBytes[:32])
 	s := new(big.Int).SetBytes(sigBytes[32:64])
-	v := new(big.Int).SetBytes(sigBytes[64:])
+	v := new(big.Int).SetInt64(int64(sigBytes[64]))
 
 	return &Signature{R: r, S: s, V: v}, nil
 }
