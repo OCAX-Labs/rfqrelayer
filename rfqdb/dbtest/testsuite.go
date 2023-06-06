@@ -23,12 +23,12 @@ import (
 	"sort"
 	"testing"
 
-	"github.com/OCAX-labs/rfqrelayer/db"
+	"github.com/OCAX-labs/rfqrelayer/rfqdb"
 )
 
 // TestDatabaseSuite runs a suite of tests against a KeyValueStore database
 // implementation.
-func TestDatabaseSuite(t *testing.T, New func() db.KeyValueStore) {
+func TestDatabaseSuite(t *testing.T, New func() rfqdb.KeyValueStore) {
 	t.Run("Iterator", func(t *testing.T) {
 		tests := []struct {
 			content map[string]string
@@ -380,7 +380,7 @@ func TestDatabaseSuite(t *testing.T, New func() db.KeyValueStore) {
 
 // BenchDatabaseSuite runs a suite of benchmarks against a KeyValueStore database
 // implementation.
-func BenchDatabaseSuite(b *testing.B, New func() db.KeyValueStore) {
+func BenchDatabaseSuite(b *testing.B, New func() rfqdb.KeyValueStore) {
 	var (
 		keys, vals   = makeDataset(1_000_000, 32, 32, false)
 		sKeys, sVals = makeDataset(1_000_000, 32, 32, true)
@@ -473,7 +473,7 @@ func BenchDatabaseSuite(b *testing.B, New func() db.KeyValueStore) {
 	})
 }
 
-func iterateKeys(it db.Iterator) []string {
+func iterateKeys(it rfqdb.Iterator) []string {
 	keys := []string{}
 	for it.Next() {
 		keys = append(keys, string(it.Key()))

@@ -3,10 +3,11 @@ package rawdb
 import (
 	"bytes"
 	"errors"
+	"fmt"
 
 	"github.com/OCAX-labs/rfqrelayer/common"
 	"github.com/OCAX-labs/rfqrelayer/core/types"
-	"github.com/OCAX-labs/rfqrelayer/db"
+	db "github.com/OCAX-labs/rfqrelayer/rfqdb"
 	"github.com/ethereum/go-ethereum/rlp"
 	"github.com/go-kit/log"
 	"github.com/go-kit/log/level"
@@ -23,9 +24,6 @@ func WriteBlock(db db.KeyValueWriter, block *types.Block) {
 func WriteBody(db db.KeyValueWriter, hash common.Hash, number uint64, body *types.Body) {
 	data, err := rlp.EncodeToBytes(body)
 
-	// test := rlp.DecodeBytes(data, body)
-
-	// fmt.Printf("WriteBody data: %+v\n", test)
 	if err != nil {
 		level.Error(logger).Log("message", "Failed to rlp encode body", "err", err)
 	}
@@ -34,7 +32,6 @@ func WriteBody(db db.KeyValueWriter, hash common.Hash, number uint64, body *type
 
 // WriteBodyRLP stores an RLP encoded block body into the database.
 func WriteBodyRLP(db db.KeyValueWriter, hash common.Hash, number uint64, rlp rlp.RawValue) {
-	// fmt.Printf("Writing block body using key:  %+v data: %+v\n", blockBodyKey(number, hash), rlp)
 	if err := db.Put(blockBodyKey(number, hash), rlp); err != nil {
 		level.Error(logger).Log("message", "Failed to store block body", "err", err)
 	}
@@ -47,6 +44,15 @@ func WriteTransaction(db db.KeyValueWriter, tx *types.Transaction) error {
 	}
 
 	return db.Put(transactionKey(tx.Hash()), data)
+}
+func WriteOpenRFQTx(db db.KeyValueWriter, tx *types.Transaction) (common.Hash, error) {
+	data, err := rlp.EncodeToBytes(tx)
+	if err != nil {
+		return common.Hash{}, err
+	}
+	hash := transactionKey(tx.ReferenceTxHash())
+	return common.BytesToHash(hash), db.Put(hash, data)
+
 }
 
 func WriteHeader(db db.KeyValueWriter, header *types.Header) {
@@ -109,16 +115,32 @@ func ReadBodyRLP(db db.Reader, hash common.Hash, number uint64) rlp.RawValue {
 	return data
 }
 
-// ReadBody retrieves the block body corresponding to the hash.
+// // ReadBody retrieves the block body corresponding to the hash.
+// func ReadBody(db db.Reader, hash common.Hash, number uint64) *types.Body {
+// 	fmt.Printf("ReadBody key: %+v\n", blockBodyKey(number, hash))
+// 	data := ReadBodyRLP(db, hash, number)
+// 	fmt.Printf("ReadBody data: %+v\n", data)
+// 	if len(data) == 0 {
+// 		return nil
+// 	}
+// 	body := new(types.Body)
+// 	if err := rlp.Decode(bytes.NewReader(data), body); err != nil {
+// 		fmt.Errorf("Failed to decode block body: %v", err)
+// 		// l
+// 		// evel.Error(logger).Log("msg", "Invalid block body RLP", "hash", hash, "err", err)
+// 		return nil
+// 	}
+// 	return body
+// }
+
 func ReadBody(db db.Reader, hash common.Hash, number uint64) *types.Body {
 	data := ReadBodyRLP(db, hash, number)
-	// fmt.Printf("ReadBody data: %+v\n", data)
 	if len(data) == 0 {
 		return nil
 	}
 	body := new(types.Body)
 	if err := rlp.Decode(bytes.NewReader(data), body); err != nil {
-		level.Error(logger).Log("msg", "Invalid block body RLP", "hash", hash, "err", err)
+		fmt.Errorf("Failed to decode block body: %v", err)
 		return nil
 	}
 	return body
@@ -149,11 +171,42 @@ func ReadHeader(db db.Reader, hash common.Hash, number uint64) *types.Header {
 // ReadBlock retrieves an entire block corresponding to the hash, assembling it
 // back from the stored header and body. If either the header or body could not
 // be retrieved nil is returned.
+// func ReadBlock(db db.Reader, hash common.Hash, number uint64) *types.Block {
+// 	header := ReadHeader(db, hash, number)
+// 	if header == nil {
+// 		return nil
+// 	}
+// 	fmt.Printf("ReadBlock header: %+v\n", header)
+// 	fmt.Printf("ReadBlock header hash: %+v, height: %d\n", header.Hash(), number)
+// 	body := ReadBody(db, hash, number)
+// 	fmt.Printf("ReadBlock body: %+v\n", body)
+// 	return types.NewBlockWithHeader(header).WithBody(body.Transactions, body.Validator)
+// }
+
 func ReadBlock(db db.Reader, hash common.Hash, number uint64) *types.Block {
 	header := ReadHeader(db, hash, number)
 	if header == nil {
 		return nil
 	}
 	body := ReadBody(db, hash, number)
+	if body == nil {
+		return types.NewBlockWithHeader(header)
+	}
 	return types.NewBlockWithHeader(header).WithBody(body.Transactions, body.Validator)
 }
+
+// Fetch all OpenRFQ transactions from the database
+
+// func ReadOpenRFQTx(db db.Iteratee) ([]*types.Transaction, error) {
+// 	var txs []*types.Transaction
+// 	iter := db.NewIterator(types.OpenRFQTxType, nil)
+// 	for iter.First(); iter.Valid(); iter.Next() {
+// 		tx := new(types.Transaction)
+// 		if err := rlp.DecodeBytes(iter.Value(), tx); err != nil {
+// 			return nil, err
+// 		}
+// 		txs = append(txs, tx)
+// 	}
+// 	iter.Release()
+// 	return txs, iter.Error()
+// }

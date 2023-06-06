@@ -1,4 +1,4 @@
-package db
+package rfqdb
 
 // IdealBatchSize defines the size of the data batches should ideally add in one
 // write.

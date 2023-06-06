@@ -11,7 +11,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/OCAX-labs/rfqrelayer/db"
+	"github.com/OCAX-labs/rfqrelayer/rfqdb"
 	"github.com/cockroachdb/pebble"
 	"github.com/cockroachdb/pebble/bloom"
 	"github.com/ethereum/go-ethereum/metrics"
@@ -282,7 +282,7 @@ func (d *Database) Delete(key []byte) error {
 
 // NewBatch creates a write-only key-value store that buffers changes to its host
 // database until a final write is called.
-func (d *Database) NewBatch() db.Batch {
+func (d *Database) NewBatch() rfqdb.Batch {
 	return &batch{
 		b: d.db.NewBatch(),
 	}
@@ -292,7 +292,7 @@ func (d *Database) NewBatch() db.Batch {
 // It's not supported by pebble, but pebble has better memory allocation strategy
 // which turns out a lot faster than leveldb. It's performant enough to construct
 // batch object without any pre-allocated space.
-func (d *Database) NewBatchWithSize(_ int) db.Batch {
+func (d *Database) NewBatchWithSize(_ int) rfqdb.Batch {
 	return &batch{
 		b: d.db.NewBatch(),
 	}
@@ -308,7 +308,7 @@ type snapshot struct {
 // happened on the database.
 // Note don't forget to release the snapshot once it's used up, otherwise
 // the stale data will never be cleaned up by the underlying compactor.
-func (d *Database) NewSnapshot() (db.Snapshot, error) {
+func (d *Database) NewSnapshot() (rfqdb.Snapshot, error) {
 	snap := d.db.NewSnapshot()
 	return &snapshot{db: snap}, nil
 }
@@ -525,7 +525,7 @@ func (b *batch) Reset() {
 }
 
 // Replay replays the batch contents.
-func (b *batch) Replay(w db.KeyValueWriter) error {
+func (b *batch) Replay(w rfqdb.KeyValueWriter) error {
 	reader := b.b.Reader()
 	for {
 		kind, k, v, ok := reader.Next()
@@ -555,7 +555,7 @@ type pebbleIterator struct {
 // NewIterator creates a binary-alphabetical iterator over a subset
 // of database content with a particular key prefix, starting at a particular
 // initial key (or after, if it does not exist).
-func (d *Database) NewIterator(prefix []byte, start []byte) db.Iterator {
+func (d *Database) NewIterator(prefix []byte, start []byte) rfqdb.Iterator {
 	iter := d.db.NewIter(&pebble.IterOptions{
 		LowerBound: append(prefix, start...),
 		UpperBound: upperBound(prefix),

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/gob"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"math/big"
@@ -17,7 +18,7 @@ import (
 	"github.com/OCAX-labs/rfqrelayer/core"
 	"github.com/OCAX-labs/rfqrelayer/core/types"
 	cryptoocax "github.com/OCAX-labs/rfqrelayer/crypto/ocax"
-	"github.com/OCAX-labs/rfqrelayer/db/pebble"
+	"github.com/OCAX-labs/rfqrelayer/rfqdb/pebble"
 	"github.com/go-kit/log"
 )
 
@@ -75,6 +76,8 @@ type Server struct {
 
 	ctx        context.Context
 	cancelFunc context.CancelFunc
+
+	Callbacks []func(*types.OpenRFQ)
 }
 
 func NewServer(options ServerOptions) (*Server, error) {
@@ -110,12 +113,14 @@ func NewServer(options ServerOptions) (*Server, error) {
 	// channel used between json rpc api and the node server
 	txChan := make(chan *types.Transaction)
 	//
+	var apiServer *api.Server
 	if len(options.APIListenAddr) > 0 {
 		apiServerCfg := api.ServerConfig{
 			Logger:     options.Logger,
 			ListenAddr: options.APIListenAddr,
 		}
-		apiServer := api.NewServer(apiServerCfg, chain, txChan)
+
+		apiServer = api.NewServer(apiServerCfg, chain, txChan)
 
 		go apiServer.Start()
 
@@ -143,6 +148,7 @@ func NewServer(options ServerOptions) (*Server, error) {
 		// for broadcasting status messages
 		ctx:        ctx,
 		cancelFunc: cancelFunc,
+		Callbacks:  make([]func(*types.OpenRFQ), 0),
 	}
 
 	s.TCPTransport.peerCh = peerCh
@@ -151,16 +157,21 @@ func NewServer(options ServerOptions) (*Server, error) {
 		s.RPCProcessor = s
 	}
 	if s.isValidator {
+		s.RegisterCallback(apiServer.BroadcastOpenRFQ)
+
 		go func() {
 			s.validatorLoop()
 		}()
 		go func() {
-			time.Sleep(time.Second * 10)
+			time.Sleep(time.Second * 8)
 			s.statusLoop()
 		}()
 	}
-
 	return s, nil
+}
+
+func (s *Server) RegisterCallback(cb func(*types.OpenRFQ)) {
+	s.Callbacks = append(s.Callbacks, cb)
 }
 
 func (s *Server) bootstrapNetwork() {
@@ -199,6 +210,11 @@ func (s *Server) Start() {
 	s.Logger.Log("accepting tcp on", s.ListenAddr, "id", s.ID)
 	var wg sync.WaitGroup
 
+	if len(s.Callbacks) > 0 && s.isValidator {
+		fmt.Printf("XXXX Starting callback loop\n")
+		go s.listenToTxEvents()
+	}
+
 free:
 	for {
 		errors := make(chan error)
@@ -216,28 +232,14 @@ free:
 			}()
 			go handleErrors(errors, s.Logger)
 
-			// TODO: Remove this due to new status loop
-			// if err := s.sendGetStatusMessage(peer); err != nil {
-			// 	fmt.Printf("Error sending get status message: %+v\n", err)
-			// 	s.Logger.Log("err", err)
-			// 	continue
-			// }
-
 		case tx := <-s.txChan:
 			fmt.Printf("XXXX Received tx [%+v]\n", tx)
+
 			if err := s.processTransaction(tx); err != nil {
 				s.Logger.Log("TX err", err)
 			}
 
-			// if rfq, ok := tx.(*RFQRequest); ok {
-			// 	fmt.Println(rfq.DataString())
-			// } else {
-			// 	// handle the case where txData is not an *RFQRequest
-			// }
-
-			// // if err != nil {
-			// 	return err
-			// }
+			// s.WriteToTables(tx)
 
 			s.Logger.Log("msg", "new transaction received", "tx", tx)
 		case rpc := <-s.rpcCh:
@@ -265,6 +267,97 @@ free:
 func handleErrors(errors <-chan error, logger log.Logger) {
 	for err := range errors {
 		logger.Log("An error occurred in readloop", err)
+	}
+}
+
+func (s *Server) listenToTxEvents() {
+	go func() {
+		for {
+			select {
+			case event := <-s.chain.EventChan:
+				fmt.Printf("XXXX Received event [%+v]\n", event)
+				s.handleTxEvent(event)
+			}
+		}
+	}()
+}
+
+func (s *Server) handleTxEvent(event types.TxEvent) {
+	switch event.TxType {
+	case types.RFQRequestTxType:
+		s.handleRFQRequest(event)
+	case types.QuoteTxType:
+		// ns.handleQuote(event)
+		// Other transaction types...
+	default:
+		// Unknown or unsupported transaction type
+		s.Logger.Log("msg", "Received unknown transaction type", "type", event.TxType)
+	}
+}
+
+func (s *Server) handleRFQRequest(event types.TxEvent) {
+	// To start a new RFQ process we broadcast to market makers the details of the RFQ
+	// and the start and end times of the RFQ.
+	// MMS will need to submit quotes before the RFQ end time.
+	// This event is triggered when a new RFQRequest transaction is received on the chain.
+	fmt.Printf("HHHHHHHHHHHHHHHHH Received RFQRequest [%+v]\n", event)
+	tx, ok := event.Transaction.(*types.Transaction)
+	if !ok {
+		s.Logger.Log("msg", "Failed to cast Transaction to Transaction", "hash", event.TxHash)
+		return
+	}
+
+	var rfq *types.SignableData
+	err := json.Unmarshal(tx.Data(), &rfq)
+	if err != nil {
+		s.Logger.Log("msg", "Failed to unmarshal RFQRequest", "err", err)
+		return
+	}
+
+	// Create an OpenRFQ transaction and broadcast it to the network
+
+	openRFQData := createOpenRFQData(rfq, event.TxHash)
+	currentTime := time.Now().Unix()
+	openRFQData.RFQStartTime = currentTime
+	openRFQData.RFQEndTime = currentTime + int64(rfq.RFQDurationMs)
+	newOpenRfq := types.NewOpenRFQ(s.ServerOptions.PrivateKey.PublicKey().Address(), openRFQData)
+	txOpenRfq := types.NewTx(newOpenRfq)
+	signedTx, err := txOpenRfq.Sign(*s.ServerOptions.PrivateKey)
+	if err != nil {
+		s.Logger.Log("msg", "Failed to sign OpenRFQ", "err", err)
+		return
+	}
+
+	// broadcast the new OpenRFQ over WebSockets
+	for _, callback := range s.Callbacks {
+		callback(newOpenRfq)
+	}
+
+	// We dont want rfqs to be constrained by block times so we also store the OpenRFQ to its own DB table
+	// we store it with the key that represents the RFQRequest transaction hash that initiated the RFQ
+	// and add it to our inmemory map of OpenRFQs
+	// TODO: do we need to sync these tables that will only be available to validator nodes? Or do we just submit
+	// final transactions to the blockchain and let the other nodes sync from there?
+
+	s.chain.WriteRFQTxs(signedTx)
+
+	// we add this to the servers list of open RFQs
+	s.chain.AddOpenRFQTx(signedTx.ReferenceTxHash(), signedTx)
+
+	// we submit it to the blockchain to provide a decentralized record of the RFQ Opening for bids
+	s.txChan <- signedTx
+
+}
+
+func createOpenRFQData(rfq *types.SignableData, txHash common.Hash) *types.RFQData {
+	fmt.Printf("ZZZZZZZZZZZZZZZ Creating OpenRFQData %+v\n", rfq)
+	return &types.RFQData{
+		RFQTxHash:          txHash,
+		RFQRequest:         *rfq,
+		RFQStartTime:       0,
+		RFQEndTime:         0,
+		SettlementContract: common.HexToAddress("0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"),
+		MatchingContract:   common.HexToAddress("0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"),
 	}
 }
 
@@ -336,8 +429,6 @@ func (s *Server) processGetBlocksMessage(from net.Addr, data *GetBlocksMessage) 
 
 	msg := NewMessage(MessageTypeBlocks, buf.Bytes(), s.ID)
 
-	// s.mu.RLock()
-	// defer s.mu.RUnlock()
 	peer, ok := s.peerMap[from]
 	if !ok {
 		return fmt.Errorf("peer not found")
@@ -348,20 +439,6 @@ func (s *Server) processGetBlocksMessage(from net.Addr, data *GetBlocksMessage) 
 	}
 	return nil
 }
-
-// func (s *Server) sendGetStatusMessage(peer *TCPPeer) error {
-// 	var (
-// 		getStatusMsg = new(GetStatusMessage)
-// 		buf          = new(bytes.Buffer)
-// 	)
-
-// 	if err := gob.NewEncoder(buf).Encode(getStatusMsg); err != nil {
-// 		return err
-// 	}
-
-// 	msg := NewMessage(MessageTypeGetStatus, buf.Bytes(), s.ID)
-// 	return peer.Send(msg)
-// }
 
 func (s *Server) broadcast(payload []byte) error {
 	s.mu.RLock()
@@ -377,28 +454,18 @@ func (s *Server) broadcast(payload []byte) error {
 }
 
 func (s *Server) processBlocksMessage(from net.Addr, data *BlocksMessage) error {
-	fmt.Printf(Cyan+"processing incoming msg: %+v"+Reset+"\n", data)
+	fmt.Printf(Cyan+"processBlocksMessage: processing incoming msg: %+v"+Reset+"\n", data)
 	for i := 0; i < len(data.Blocks); i++ {
 		header := data.Blocks[i].Header
 		block := data.Blocks[i].Block
 		newBlock := types.NewBlockWithHeader(header).WithBody(block.Transactions(), block.Validator)
-		fmt.Printf(Yellow+"newBlock [%d]: %+v"+Reset+"\n", i, newBlock)
-		// fmt.Printf(Purple+"block.header [%d]: %+v"+Reset+"\n", i, block.Header())
+
 		if err := s.chain.VerifyBlock(newBlock); err != nil {
 			s.Logger.Log("err", err)
 			continue
 		}
 
 	}
-
-	// for _, block := range data.Blocks {
-	// 	block := block.Block.WithHeader(block.Header)
-	// 	if err := s.chain.VerifyBlock(block); err != nil {
-	// 		fmt.Printf("BLOCK ERROR: %s\n", err)
-	// 		continue
-	// 		// s.Logger.Log("err", err)
-	// 	}
-	// }
 
 	return nil
 }
@@ -431,7 +498,6 @@ func (s *Server) statusLoop() {
 				buf := new(bytes.Buffer)
 				status := s.createStatusMessage(buf) // This should include the current block height
 				for _, peer := range s.peerMap {
-					fmt.Printf(Cyan+"[%s] - node: sending status message to: [%s] => %+v"+Reset+"\n", s.ID, peer.conn.RemoteAddr(), status)
 					_ = peer.Send(status)
 				}
 				lastBroadcastHeight = currentHeight
@@ -482,8 +548,13 @@ func (s *Server) processBlock(b *types.Block) error {
 }
 
 func (s *Server) processTransaction(tx *types.Transaction) error {
+	// Not all txs need to be added to the mempool immediately
+	// Txs that are added are as follows:
+	// 1. RFQRequestTx - added upon receipt from a client
+	// 2. OpenRfqRequestTx - created/added by a validator no
+	// 3. RFQResponseTx - created/added by a validator node
 	hash := tx.Hash()
-
+	s.Logger.Log("msg", "received tx", "hash", hash, "transType", tx.Type(), "mempool len", s.memPool.PendingCount())
 	if s.memPool.Contains(hash) {
 		return nil
 	}
@@ -498,9 +569,18 @@ func (s *Server) processTransaction(tx *types.Transaction) error {
 		"mempool len", s.memPool.PendingCount(),
 	)
 
+	// You'll need to add logic here to perform the type checking since I don't know what the type will look like
+
 	go s.broadcastTx(tx)
 
 	s.memPool.Add(tx)
+
+	// og the RFQRequest has been verified we need to broadcast over websockets the start of a new tfq round
+	if tx.Type() == types.RFQRequestTxType {
+		s.Logger.Log("msg", "adding RFQRequestTx to event channel")
+		s.chain.EventChan <- types.TxEvent{TxType: tx.Type(), TxHash: tx.Hash(), Transaction: tx}
+	}
+
 	return nil
 }
 
@@ -509,11 +589,10 @@ func (s *Server) requestBlocksLoop(peer net.Addr, blocksIndex int64) error {
 	ticker := time.NewTicker(6 * time.Second)
 
 	for {
-		fmt.Printf("block height before request: %d\n", s.chain.Height())
-		fmt.Printf("requesting blocksIndex: %d\n", blocksIndex)
+
 		headersLength := len(s.chain.Headers())
 		// blocksIndex := int64(headersLength)
-		if headersLength >= int(blocksIndex) {
+		if headersLength > int(blocksIndex) {
 			s.Logger.Log("msg", "finished syncing", "addr", peer)
 			return nil
 		}
@@ -572,7 +651,7 @@ func (s *Server) broadcastTx(tx *types.Transaction) error {
 func (s *Server) CreateNewBlock() error {
 	// 1. get transactions from mempool
 	// 2. create a new block
-	currentHeader, err := s.chain.GetHeader(s.chain.Height())
+	currentHeader, err := s.chain.GetBlockHeader(s.chain.Height())
 	if err != nil {
 		return err
 	}

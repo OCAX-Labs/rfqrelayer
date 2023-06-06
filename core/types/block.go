@@ -77,32 +77,55 @@ type Body struct {
 }
 
 func (b *Body) EncodeRLP(w io.Writer) error {
-	encoded := struct {
-		Transactions []*Transaction
-		Validator    cryptoocax.PublicKey
-	}{
-		Transactions: b.Transactions,
-		Validator:    b.Validator,
-	}
-
-	return rlp.Encode(w, encoded)
+	return rlp.Encode(w, []interface{}{b.Transactions, b.Validator})
 }
 
 func (b *Body) DecodeRLP(s *rlp.Stream) error {
-	var data struct {
-		Transactions []*Transaction
-		Validator    cryptoocax.PublicKey
-	}
-
-	if err := s.Decode(&data); err != nil {
+	// Start reading list
+	_, err := s.List()
+	if err != nil {
 		return err
 	}
 
-	b.Transactions = data.Transactions
-	b.Validator = data.Validator
+	var transactions []*Transaction
+	if err := s.Decode(&transactions); err != nil {
+		return err
+	}
 
-	return nil
+	var validator cryptoocax.PublicKey
+	if err := s.Decode(&validator); err != nil {
+		return err
+	}
+
+	b.Transactions = transactions
+	b.Validator = validator
+
+	return s.ListEnd()
 }
+
+// func (b *Body) DecodeRLP(s *rlp.Stream) error {
+// 	var data struct {
+// 		Transactions [][]byte
+// 		Validator    cryptoocax.PublicKey
+// 	}
+
+// 	if err := s.Decode(&data); err != nil {
+// 		return err
+// 	}
+
+// 	b.Transactions = make([]*Transaction, len(data.Transactions))
+// 	for i, txBytes := range data.Transactions {
+// 		tx := &Transaction{}
+// 		if err := rlp.DecodeBytes(txBytes, tx); err != nil {
+// 			return err
+// 		}
+// 		b.Transactions[i] = tx
+// 	}
+
+// 	b.Validator = data.Validator
+
+// 	return nil
+// }
 
 type Block struct {
 	header *Header

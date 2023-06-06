@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"math/big"
+	"strings"
 	"sync/atomic"
 	"time"
 
@@ -20,15 +21,24 @@ var (
 	ErrInvalidTxType      = errors.New("transaction type not valid in this context")
 	ErrTxTypeNotSupported = errors.New("transaction type not supported")
 	errShortTypedTx       = errors.New("typed transaction too short")
+	errInvalidAddress     = errors.New("invalid Ethereum address")
+	errInvalidChecksum    = errors.New("invalid Ethereum address checksum")
+	errInvalidSymbol      = errors.New("invalid token symbol")
+	errInvalidDecimals    = errors.New("invalid token decimals")
+	errInvalidAmount      = errors.New("invalid token amount")
+	errInvalidDuration    = errors.New("invalid RFQ duration")
+	errInvalidRequestorId = errors.New("invalid requestor ID")
+	errInvalidTimestamp   = errors.New("invalid timestamp")
 )
 
 const (
-	RFQRequestTxType    = 0x00
-	QuoteTxType         = 0x01
-	AuctionRecordTxType = 0x02
+	RFQRequestTxType = 0x00
+	OpenRFQTxType    = 0x01
+	ClosedRFQTxType  = 0x02
+	MatchedRFQTxType = 0x03
+	SettledRFQTxType = 0x04
+	QuoteTxType      = 0x05
 )
-
-type AuctionRecord struct{}
 
 type Transaction struct {
 	inner TxData
@@ -41,7 +51,9 @@ type Transaction struct {
 }
 
 func NewTx(inner TxData) *Transaction {
-	tx := new(Transaction)
+	tx := &Transaction{
+		inner: inner,
+	}
 	tx.setDecoded(inner.copy(), 0)
 	return tx
 }
@@ -53,12 +65,45 @@ type TxData interface {
 
 	data() []byte
 
+	rfqData() *SignableData
+
 	rawSignatureValues() (v, r, s *big.Int)
 	setSignatureValues(v, r, s *big.Int)
+	referenceTxHash() common.Hash // add this
 }
 
 func (tx *Transaction) EncodeRLP(w io.Writer) error {
-	return rlp.Encode(w, tx.inner)
+	buf := encodeBufferPool.Get().(*bytes.Buffer)
+	defer encodeBufferPool.Put(buf)
+	buf.Reset()
+	if err := tx.encodeTyped(buf); err != nil {
+		return err
+	}
+	return rlp.Encode(w, buf.Bytes())
+}
+
+// transactions, it returns the type and payload.
+func (tx *Transaction) MarshalBinary() ([]byte, error) {
+	var buf bytes.Buffer
+	err := tx.encodeTyped(&buf)
+	return buf.Bytes(), err
+}
+
+func (tx *Transaction) DecodeRLP(s *rlp.Stream) error {
+	var b []byte
+	var err error
+
+	if b, err = s.Bytes(); err != nil {
+		return err
+	}
+
+	fmt.Printf("Decoding transaction. Length: %d\n", len(b)) // Debug output
+
+	inner, err := tx.decodeTyped(b)
+	if err == nil {
+		tx.setDecoded(inner, uint64(len(b)))
+	}
+	return err
 }
 
 // encodeTyped writes the canonical encoding of a typed transaction to w.
@@ -67,58 +112,33 @@ func (tx *Transaction) encodeTyped(w *bytes.Buffer) error {
 	return rlp.Encode(w, tx.inner)
 }
 
-// MarshalBinary returns the canonical encoding of the transaction.
-// For legacy transactions, it returns the RLP encoding. For EIP-2718 typed
-// transactions, it returns the type and payload.
-func (tx *Transaction) MarshalBinary() ([]byte, error) {
-	if tx.Type() == RFQRequestTxType {
-		return rlp.EncodeToBytes(tx.inner)
-	}
-	var buf bytes.Buffer
-	err := tx.encodeTyped(&buf)
-	return buf.Bytes(), err
-}
-
-func (tx *Transaction) DecodeRLP(s *rlp.Stream) error {
-	var txData RFQRequest
-	if err := s.Decode(&txData); err != nil {
-		return err
-	}
-
-	tx.inner = &txData
-	return nil
-}
-
 // UnmarshalBinary decodes the canonical encoding of transactions.
 // It supports legacy RLP transactions and EIP2718 typed transactions.
 func (tx *Transaction) UnmarshalBinary(b []byte) error {
-	var data RFQRequest
-	if data.V == nil {
-		data.V = new(big.Int)
-	}
-	if data.R == nil {
-		data.R = new(big.Int)
-	}
-	if data.S == nil {
-		data.S = new(big.Int)
-	}
-	err := rlp.DecodeBytes(b, &data)
+	inner, err := tx.decodeTyped(b)
 	if err != nil {
 		return err
 	}
-	tx.setDecoded(&data, uint64(len(b)))
+	tx.setDecoded(inner, uint64(len(b)))
 	return nil
 }
 
 // decodeTyped decodes a typed transaction from the canonical format.
 func (tx *Transaction) decodeTyped(b []byte) (TxData, error) {
 	if len(b) <= 1 {
+		fmt.Println("len(b) <= 1 ", len(b))
 		return nil, errShortTypedTx
 	}
-	fmt.Printf("b[0]: %+v\n", b[0])
+
 	switch b[0] {
 	case RFQRequestTxType:
 		var inner RFQRequest
+		fmt.Printf("Trying to decode RFQRequest. Bytes: %v\n", b[1:])
+		err := rlp.DecodeBytes(b[1:], &inner)
+		// err := rlp.DecodeBytes(b[1:], &inner)
+		return &inner, err
+	case OpenRFQTxType:
+		var inner OpenRFQ
 		err := rlp.DecodeBytes(b[1:], &inner)
 		return &inner, err
 	case QuoteTxType:
@@ -139,6 +159,7 @@ func (tx *Transaction) setDecoded(inner TxData, size uint64) {
 	}
 }
 
+// decodeTyped decodes a ty
 // Type returns the transaction type.
 func (tx *Transaction) Type() uint8 {
 	return tx.inner.txType()
@@ -154,6 +175,14 @@ func (tx *Transaction) From() *common.Address {
 // Data returns the input data of the transaction.
 func (tx *Transaction) Data() []byte { return tx.inner.data() }
 
+func (tx *Transaction) ReferenceTxHash() common.Hash {
+	return tx.inner.referenceTxHash()
+}
+
+func (tx *Transaction) RFQData() *SignableData {
+	return tx.inner.rfqData()
+}
+
 // RawSignatureValues returns the V, R, S signature values of the transaction.
 // The return values should not be modified by the caller.
 func (tx *Transaction) RawSignatureValues() (v, r, s *big.Int) {
@@ -165,15 +194,8 @@ func (tx *Transaction) Hash() common.Hash {
 	if hash := tx.hash.Load(); hash != nil {
 		return hash.(common.Hash)
 	}
-
-	v, r, s := tx.inner.rawSignatureValues()
-
-	fmt.Printf("TxHash: from: %s, data: %s, v: %s, r: %s, s: %s\n", tx.inner.from().String(), string(tx.inner.data()), v.String(), r.String(), s.String())
-
-	h := rlpHash([]interface{}{
-		tx.inner.from(),
-		tx.inner.data(),
-	})
+	fmt.Printf("Hashing transaction. Type: %d, Data: %#v\n", tx.Type(), tx.inner)
+	h := prefixedRlpHash(tx.Type(), tx.inner.data())
 	tx.hash.Store(h)
 	return h
 }
@@ -255,7 +277,8 @@ func (tx *Transaction) Verify() error {
 	}
 
 	hash := tx.Hash() // Calculate the transaction hash here.
-	fmt.Printf("hash: %+v\n", hash)
+	fmt.Printf("TX hash: %+v\n", hash.Hex())
+	fmt.Printf("Tx data: %+v\n", tx.inner)
 	recoveredPubKey, err := cryptoocax.Ecrecover(hash.Bytes(), sig.ToBytes())
 	if err != nil {
 		return fmt.Errorf("failed to recover public key: %v", err)
@@ -303,6 +326,59 @@ func (tx *Transaction) String() string {
 		r.String(),
 		s.String(),
 	)
+}
+
+func (tx *Transaction) Validate() error {
+
+	// validate the signature
+
+	if err := tx.Verify(); err != nil {
+		return err
+	}
+
+	if err := tx.validateRequestorId(); err != nil {
+		return err
+	}
+
+	if err := validateAddress(*tx.From()); err != nil {
+		return err
+	}
+
+	if err := tx.RFQData().Validate(); err != nil {
+		return err
+	}
+
+	// Repeat similar validations for other fields...
+	return nil
+}
+
+// validateRequestorId validates the requestor ID field.
+func (r *Transaction) validateRequestorId() error {
+	// Logic here to validate the requestor ID field
+	// match, _ := regexp.MatchString("^[0-9]+$", r.RequestorId)
+	// if !match {
+	// 	return errInvalidRequestorId
+	// }
+	return nil
+}
+
+// validateAddress validates that the given string is a valid Ethereum address.
+func validateAddress(addr common.Address) error {
+	if !common.IsHexAddress(addr.String()) {
+		return errInvalidAddress
+	}
+
+	// check if the address has mixed case, then it should be checksum
+	if hasMixedCase(addr.String()) && !common.IsHexAddress(addr.Hex()) {
+		return errInvalidChecksum
+	}
+
+	return nil
+}
+
+// helper function to determine if the address has mixed case
+func hasMixedCase(s string) bool {
+	return strings.ToLower(s) != s && strings.ToUpper(s) != s
 }
 
 // copyAddressPtr copies an address.

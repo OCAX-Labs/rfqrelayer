@@ -1,4 +1,4 @@
-package db
+package rfqdb
 
 type Snapshot interface {
 	// Has retrieves if a key is present in the snapshot backing by a key-value

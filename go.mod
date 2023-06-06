@@ -4,7 +4,7 @@ go 1.20
 
 require (
 	github.com/cockroachdb/pebble v0.0.0-20230503231107-9e575c4c10ae
-	github.com/ethereum/go-ethereum v1.11.6
+	github.com/ethereum/go-ethereum v1.12.0
 	github.com/go-kit/log v0.2.1
 	github.com/labstack/echo/v4 v4.10.0
 	github.com/sirupsen/logrus v1.9.0

@@ -89,4 +89,9 @@ Initially for the encryption of quotes we will implement the following scheme (t
 - [x] Websockets for broadcasting rfqs
 - [ ] Consensus: To be implemented currently using PoA
 - [ ] API Endpoint: GetRFQs() in progress
-- [ ] API Endpoint: GetRFQ(hash o
+- [ ] API Endpoint: GetRFQ(hash) in progress
+- [ ] API Endpoint: PostQuote(quote) To be implemented
+- [ ] Websockets for MPC Node Records: To be implemented
+- [ ] Storage Optimization: To be implemented
+- [ ] Performance Optimization: To be implemented
+- [ ] Security Audit: To be implemented

@@ -54,7 +54,7 @@ func (v *BlockValidator) ValidateBlock(b *types.Block) error {
 
 	prevHeight := proposedBlockHeight.Sub(proposedBlockHeight, big.NewInt(1))
 
-	prevHeader, err := v.bc.GetHeader(prevHeight)
+	prevHeader, err := v.bc.GetBlockHeader(prevHeight)
 	if err != nil {
 		return err
 	}

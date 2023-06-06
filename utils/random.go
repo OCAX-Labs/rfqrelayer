@@ -28,7 +28,7 @@ func NewRandomTransaction(pubKey cryptoocax.PublicKey) *types.Transaction {
 	from := pubKey.Address()
 	inner := &types.RFQRequest{
 		From: from,
-		Data: *randomRFQ(),
+		Data: randomRFQ(),
 	}
 
 	tx := types.NewTx(inner)
@@ -36,22 +36,22 @@ func NewRandomTransaction(pubKey cryptoocax.PublicKey) *types.Transaction {
 	return tx
 }
 
-func randomRFQ() *types.SignableRFQData {
+func randomRFQ() *types.SignableData {
 	// generate a random number to be used as the requestor id
 	rand, err := rand.Int(rand.Reader, big.NewInt(100000000))
 	if err != nil {
 		panic(err)
 	}
-	// Create an instance of SignableRFQData
-	signableData := types.SignableRFQData{
+	// Create an instance of SignableData
+	signableData := types.SignableData{
 		RequestorId:     "119",
-		BaseTokenAmount: rand.String(),
-		BaseToken: types.BaseToken{
+		BaseTokenAmount: big.NewInt(rand.Int64()),
+		BaseToken: &types.BaseToken{
 			Address:  common.HexToAddress("0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"),
 			Symbol:   "VFG",
 			Decimals: 18,
 		},
-		QuoteToken: types.QuoteToken{
+		QuoteToken: &types.QuoteToken{
 			Address:  common.HexToAddress("0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"),
 			Symbol:   "USDC",
 			Decimals: 6,

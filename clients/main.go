@@ -21,11 +21,11 @@ type TransactionWrapper struct {
 }
 
 type RFQRequestWrapper struct {
-	From string                `json:"from"`
-	Data types.SignableRFQData `json:"data"`
-	V    *big.Int              `json:"v"`
-	R    *big.Int              `json:"r"`
-	S    *big.Int              `json:"s"`
+	From string             `json:"from"`
+	Data types.SignableData `json:"data"`
+	V    *big.Int           `json:"v"`
+	R    *big.Int           `json:"r"`
+	S    *big.Int           `json:"s"`
 }
 
 func main() {
@@ -38,16 +38,19 @@ func main() {
 	checkSumAddr := addr.Hex()
 	addr = common.HexToAddress(checkSumAddr)
 
-	// Create an instance of SignableRFQData
-	signableData := types.SignableRFQData{
+	amountTokens := big.NewInt(199)
+	amountTokens = amountTokens.Mul(amountTokens, big.NewInt(1e18)) // add 18 decimals
+
+	// Create an instance of SignableData
+	signableData := types.SignableData{
 		RequestorId:     "119",
-		BaseTokenAmount: "1000000",
-		BaseToken: types.BaseToken{
+		BaseTokenAmount: amountTokens,
+		BaseToken: &types.BaseToken{
 			Address:  common.HexToAddress("0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"),
 			Symbol:   "VFG",
 			Decimals: 18,
 		},
-		QuoteToken: types.QuoteToken{
+		QuoteToken: &types.QuoteToken{
 			Address:  common.HexToAddress("0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"),
 			Symbol:   "USDC",
 			Decimals: 6,
@@ -55,17 +58,18 @@ func main() {
 		RFQDurationMs: 60000,
 	}
 
-	rfqRequest := types.NewTransaction(addr, signableData)
+	rfqRequest := types.NewRFQRequest(addr, &signableData)
 	tx := types.NewTx(rfqRequest)
+	hashBefore := tx.Hash()
+	fmt.Printf("Transaction hash before: %s\n", hashBefore.Hex())
 	signedTx, err := tx.Sign(privateKey)
 	if err != nil {
 		log.Fatalf("Failed to sign data: %v", err)
 	}
 
-	txWrapper := NewTransactionWrapper(signedTx)
-	txWrapper.Inner.Data = signableData
-
-	signedTxJson, err := json.Marshal(txWrapper)
+	hash := signedTx.Hash()
+	fmt.Printf("Transaction hash: %s\n", hash.Hex())
+	signedTxJson, err := signedTx.MarshalJSON()
 	if err != nil {
 		log.Fatalf("Failed to marshal signed transaction to JSON: %v", err)
 	}

@@ -24,15 +24,7 @@ type TCPPeer struct {
 
 func (p *TCPPeer) Send(msg *Message) error {
 
-	// fmt.Printf("message header %v\n", msg.Header) // Log the message being sent
-	// fmt.Printf("message id %s\n", msg.ID)         // Log the message being sent
-	// fmt.Printf("peer id %s"+Reset+"\n", p.ID)     // Log the peer id
-	// fmt.Printf("peer transport id %+v\n", p.transport)
-
 	payload := msg.Bytes()
-	// Prevent sending a message to self
-
-	// return fmt.Errorf("node cannot send message to itself")
 
 	p.conn.SetWriteDeadline(time.Now().Add(timeout)) // Set a write deadline
 	_, err := p.conn.Write(payload)

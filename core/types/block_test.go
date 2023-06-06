@@ -3,6 +3,7 @@ package types
 import (
 	"bytes"
 	"crypto/rand"
+	"fmt"
 	"math/big"
 	"testing"
 	"time"
@@ -57,7 +58,7 @@ func TestAddTransaction(t *testing.T) {
 
 	tx := NewTx(&RFQRequest{
 		From: from,
-		Data: *randomRFQ(t),
+		Data: randomRFQ(t),
 	})
 
 	block.AddTransaction(tx)
@@ -138,16 +139,16 @@ func TestAddressEncodeDecode(t *testing.T) {
 		t.Fatalf("Addresses do not match, got: %v, want: %v", decodedAddr, addr)
 	}
 }
-
 func TestBodyEncodeDecode(t *testing.T) {
 	privKey := cryptoocax.GeneratePrivateKey()
 	tx1 := NewTx(&RFQRequest{
 		From: privKey.PublicKey().Address(),
-		Data: *randomRFQ(t),
+		Data: randomRFQ(t),
 	})
 
 	body := &Body{
-		Transactions: Transactions{tx1},
+		Transactions: []*Transaction{tx1},
+		Validator:    privKey.PublicKey(),
 	}
 
 	var buffer bytes.Buffer
@@ -156,15 +157,20 @@ func TestBodyEncodeDecode(t *testing.T) {
 		t.Fatalf("Failed to encode Body: %v", err)
 	}
 
+	fmt.Printf("Encoded body length: %d\n", buffer.Len()) // Debug output
+
 	var decodedReq Body
 	s := rlp.NewStream(&buffer, 0)
 	err = decodedReq.DecodeRLP(s)
-	// err = rlp.Decode(&buffer, &decodedReq)
 	if err != nil {
 		t.Fatalf("Failed to decode Body: %v", err)
 	}
-
-	// Check if decodedReq matches req
+	assert.Equal(t, len(body.Transactions), len(decodedReq.Transactions))
+	for i := range body.Transactions {
+		assert.Equal(t, body.Transactions[i].Data(), decodedReq.Transactions[i].Data())
+		assert.Equal(t, body.Transactions[i].From(), decodedReq.Transactions[i].From())
+		// add more fields here as necessary
+	} // Check if decodedReq matches req
 }
 
 // TestBlockEncodeDecodeWithTransactions checks if blocks with transactions are correctly encoded and decoded.
@@ -175,7 +181,7 @@ func TestBlockEncodeDecodeWithTransactions(t *testing.T) {
 
 	transaction := NewTx(&RFQRequest{
 		From: from,
-		Data: *randomRFQ(t),
+		Data: randomRFQ(t),
 	})
 	txs := Transactions{transaction, transaction}
 	// txs := Transactions{}
@@ -240,21 +246,21 @@ func randomBlock(t *testing.T, height int64, prevBlockhash common.Hash, key cryp
 	return b
 }
 
-func randomRFQ(t *testing.T) *SignableRFQData {
+func randomRFQ(t *testing.T) *SignableData {
 	// generate a random number to be used as the requestor id
 	rand, err := rand.Int(rand.Reader, big.NewInt(100000000))
 	assert.Nil(t, err)
-
-	// Create an instance of SignableRFQData
-	signableData := SignableRFQData{
+	baseTokenAmt := rand.Uint64()
+	// Create an instance of SignableData
+	signableData := &SignableData{
 		RequestorId:     "119",
-		BaseTokenAmount: rand.String(),
-		BaseToken: BaseToken{
+		BaseTokenAmount: big.NewInt(int64(baseTokenAmt)),
+		BaseToken: &BaseToken{
 			Address:  common.HexToAddress("0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"),
 			Symbol:   "VFG",
 			Decimals: 18,
 		},
-		QuoteToken: QuoteToken{
+		QuoteToken: &QuoteToken{
 			Address:  common.HexToAddress("0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"),
 			Symbol:   "USDC",
 			Decimals: 6,
@@ -262,5 +268,5 @@ func randomRFQ(t *testing.T) *SignableRFQData {
 		RFQDurationMs: 60000,
 	}
 
-	return &signableData
+	return signableData
 }

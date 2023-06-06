@@ -1,6 +1,7 @@
 package core
 
 import (
+	"bytes"
 	"fmt"
 	"math/big"
 	"sync"
@@ -9,7 +10,8 @@ import (
 	"github.com/OCAX-labs/rfqrelayer/common"
 	"github.com/OCAX-labs/rfqrelayer/core/rawdb"
 	"github.com/OCAX-labs/rfqrelayer/core/types"
-	"github.com/OCAX-labs/rfqrelayer/db/pebble"
+	"github.com/OCAX-labs/rfqrelayer/rfqdb"
+	"github.com/OCAX-labs/rfqrelayer/rfqdb/pebble"
 	"github.com/ethereum/go-ethereum/common/lru"
 	"github.com/ethereum/go-ethereum/rlp"
 	"github.com/go-kit/log"
@@ -19,17 +21,37 @@ type ChainInterface interface {
 	GetTxByHash(hash common.Hash) (*types.Transaction, error)
 	GetBlockByHash(hash common.Hash) (*types.Block, error)
 	GetBlock(height *big.Int) (*types.Block, error)
+	GetBlockHeader(height *big.Int) (*types.Header, error)
+	GetRFQRequests() ([]*types.SignableData, error)
+	WriteRFQTxs(tx *types.Transaction) error
+
 	// GetLatestBlock() *types.Block
 }
 
 type Blockchain struct {
-	logger   log.Logger
-	db       *pebble.Database
-	lock     sync.RWMutex
-	headers  []*types.Header
-	openRFQS []*types.RFQRequest
+	logger log.Logger
+	// blocks are stored in db tables used to provide fast lookup or rfqs
+	db      *pebble.Database
+	lock    sync.RWMutex
+	headers []*types.Header
 
-	// blocks  []*Block
+	// tracks all open RFQS in memory - these are open RFQS that havent yet received quotes
+	// as quotes are received the openRFQS are updated by appending to the quotes array
+	openRFQS []*types.Transaction
+	// tracks all closed RFQS which are not yet matched in memory
+	closedRFQS []*types.Transaction
+	// tracks all matched RFQS in memory that are pending settlement
+	matchedRFQS []*types.Transaction
+
+	// Abstract tables are used to track rfq data and progress
+	rfqRequestsTable rfqdb.Database
+	openRFQSTable    rfqdb.Database
+	closedRFQSTable  rfqdb.Database
+	matchedRFQSTable rfqdb.Database
+	settledRFQSTable rfqdb.Database
+	quotesTable      rfqdb.Database
+
+	// TODO: Remove this
 	txStore map[common.Hash]*types.Transaction
 	// blockStore map[common.Hash]*Block
 	genesisBlock *types.Block
@@ -39,29 +61,60 @@ type Blockchain struct {
 	currentBlock atomic.Pointer[types.Header] // Current head of the chain
 	bodyCache    *lru.Cache[common.Hash, *types.Body]
 	bodyRLPCache *lru.Cache[common.Hash, rlp.RawValue]
+
+	EventChan EventChan
 }
 
+type EventChan chan types.TxEvent
+
 func NewBlockchain(l log.Logger, genesis *types.Block, db *pebble.Database, validator bool) (*Blockchain, error) {
+
+	// initialize tables in the kv store for storing the differnt types of Txs
+	rfqRequestsTable := rawdb.NewTable(db, "rfqRequests")
+	openRFQSTable := rawdb.NewTable(db, "openRFQs")
+	closedRFQSTable := rawdb.NewTable(db, "closeRFQs")
+	matchedRFQSTable := rawdb.NewTable(db, "matchedRFQs")
+	settledRFQSTable := rawdb.NewTable(db, "settledRFQs")
+	quotesTable := rawdb.NewTable(db, "quotes")
 	bc := &Blockchain{
-		headers:  []*types.Header{},
-		db:       db,
-		logger:   l,
-		openRFQS: []*types.RFQRequest{},
-		// blockStore: make(map[common.Hash]*Block),
+		headers: []*types.Header{},
+		db:      db,
+		logger:  l,
+
+		// tracks all open RFQS in memory
+		openRFQS: []*types.Transaction{},
+		// tracks all closed RFQS which are not yet matched in memory
+		closedRFQS: []*types.Transaction{},
+		// tracks all matched RFQS in memory that are pending settlement
+		matchedRFQS: []*types.Transaction{},
+
+		// Abstract tables are used for storing each type of transaction in the db
+		rfqRequestsTable: rfqRequestsTable,
+		openRFQSTable:    openRFQSTable,
+		closedRFQSTable:  closedRFQSTable,
+		matchedRFQSTable: matchedRFQSTable,
+		settledRFQSTable: settledRFQSTable,
+		quotesTable:      quotesTable,
+		// mapping of OpenRfqs to TxHash for quick lookup retrieval from the db
 		txStore: make(map[common.Hash]*types.Transaction),
 	}
+	bc.EventChan = make(EventChan)
+
 	if validator {
-		bc.validator = NewBlockValidator(bc)
+		bc.SetValidator(NewBlockValidator(bc))
 		err := bc.addBlockWithoutValidation(genesis)
 		if err != nil {
 			return nil, err
 		}
+		genesis, err := bc.GetBlock(big.NewInt(0))
+		if err != nil {
+			return nil, err
+		}
+		if genesis == nil {
+			return nil, fmt.Errorf("failed to load genesis block")
+		}
+		bc.genesisBlock = genesis
 	}
-
-	// bc.genesisBlock = bc.GetBlockByNumber(0)
-	// if bc.genesisBlock == nil {
-	// 	return nil, ErrNoGenesis
-	// }
 
 	bc.currentBlock.Store(nil)
 
@@ -95,7 +148,7 @@ func (bc *Blockchain) VerifyBlock(b *types.Block) error {
 
 		bc.logger.Log("msg", "Parsing Transactions", "len", len(tx.Data()), "hash", tx.Hash())
 	}
-	bc.logger.Log("msg", "Verifying block for commit to chain ...", "height", b.Height().String())
+	bc.logger.Log("msg", "Verifying block for commit to chain ...", "height", b.Height().String(), "hash", b.Hash().String())
 
 	return bc.addBlockWithoutValidation(b)
 }
@@ -129,8 +182,7 @@ func (bc *Blockchain) GetBlock(height *big.Int) (*types.Block, error) {
 		return nil, fmt.Errorf("blockchain height [%s] is less than requested height [%d]", currHeight.String(), reqHeight)
 	}
 	bc.lock.RLock()
-	defer bc.lock.RUnlock()
-	blockHeader, err := bc.GetHeader(height)
+	blockHeader, err := bc.GetBlockHeader(height)
 	if err != nil {
 		return nil, err
 	}
@@ -138,11 +190,12 @@ func (bc *Blockchain) GetBlock(height *big.Int) (*types.Block, error) {
 	if block == nil {
 		return nil, fmt.Errorf("block with hash [%x] not found", blockHeader.Hash())
 	}
+	bc.lock.RUnlock()
 
 	return block, nil
 }
 
-func (bc *Blockchain) GetHeader(height *big.Int) (*types.Header, error) {
+func (bc *Blockchain) GetBlockHeader(height *big.Int) (*types.Header, error) {
 	if height.Cmp(big.NewInt(int64(len(bc.headers)))) == 1 {
 		return nil, fmt.Errorf("blockchain height [%d] is less than requested height [%d]", len(bc.headers), height.Int64())
 	}
@@ -168,6 +221,14 @@ func (bc *Blockchain) HasBlock(height *big.Int) bool {
 	return false
 }
 
+// This is an inmemory list of open rfqs
+// TODO: add functions for managing this list on rfq expiry
+func (bc *Blockchain) AddOpenRFQTx(kvHash common.Hash, openRFQ *types.Transaction) {
+	bc.lock.Lock()
+	defer bc.lock.Unlock()
+	bc.openRFQS = append(bc.openRFQS, openRFQ)
+}
+
 func (bc *Blockchain) Height() *big.Int {
 	bc.lock.RLock()
 	defer bc.lock.RUnlock()
@@ -182,42 +243,95 @@ func (bc *Blockchain) Headers() []*types.Header {
 	return bc.headers
 }
 
-func (bc *Blockchain) addBlockWithoutValidation(b *types.Block) error {
-	// bc.lock.Lock()
-	// defer bc.lock.Unlock()
-	bc.headers = append(bc.headers, b.Header())
+func (bc *Blockchain) GetOpenRFQs() []*types.Transaction {
+	return bc.openRFQS
+}
 
-	// Store block with block hash as key
-	// blockKey := b.Hash().Bytes()
-	// blockBytes, err := rlp.EncodeToBytes(b)
-	// if err != nil {
-	// 	return err
-	// }
-	// fmt.Printf("BBLOCK => Writing block to db: %+v\n", b)
+func (bc *Blockchain) WriteRFQTxs(tx *types.Transaction) error {
 	bc.lock.Lock()
+	defer bc.lock.Unlock()
+
+	var err error
+	// For fast access to RFQ data we also write the transaction to "tables" in the kv store so they can be
+	// accessed quickly
+	// Note that there is a one to one relationship between rfQRequests types due to the transitions that occur
+	// in the rfq process which is as follows:
+	// 1. RFQRequestTxType - The original request - if the request is verified and validated a new OpenRFQTxType transaction created
+	// 2. OpenRFQTxType - is created when RFQ Quotes can be received and on each receipt the record is updated
+	// 3. CloseRFQTxType - is created when the RFQ is closed and ready for Matching by MPC nodes
+	// 4. MatchedRFQTxType - is created when the RFQ is matched by MPC nodes and settlement is pending
+	// 5. SettledRFQTxType - is created when the RFQ is settled and the transaction is complete
+	// transactions 2,3,4,5 will have a 1 to 1 relationship with the original RFQRequestTxType - and are stored in the kv store
+	// with the same key as the original RFQRequestTxType - but with a different prefix. Also, the original RFQRequestTxType
+	// and quotes are signed by the submitting parties whereas the other types are generated by a validator node and signed by
+	// the validator node.
+	switch tx.Type() {
+	case types.RFQRequestTxType:
+		// for the original RFQ request we use the hash of the transaction as the key
+		// as all other transaction types refer to this RFQ they will be saved in their
+		// respective tables with the same key
+		err = bc.rfqRequestsTable.Put(tx.Hash().Bytes(), tx.Data())
+	case types.OpenRFQTxType:
+		err = bc.openRFQSTable.Put(tx.ReferenceTxHash().Bytes(), tx.Data())
+	case types.ClosedRFQTxType:
+		err = bc.closedRFQSTable.Put(tx.ReferenceTxHash().Bytes(), tx.Data())
+	case types.MatchedRFQTxType:
+		err = bc.matchedRFQSTable.Put(tx.ReferenceTxHash().Bytes(), tx.Data())
+	case types.SettledRFQTxType:
+		err = bc.settledRFQSTable.Put(tx.ReferenceTxHash().Bytes(), tx.Data())
+	case types.QuoteTxType:
+		err = bc.quotesTable.Put(tx.ReferenceTxHash().Bytes(), tx.Data())
+	default:
+		return fmt.Errorf("unknown transaction type: %d", tx.Type())
+	}
+
+	if err != nil {
+		return fmt.Errorf("error writing transaction to kv store tables: %s", err.Error())
+	}
+	return nil
+}
+
+func (bc *Blockchain) GetRFQRequests() ([]*types.SignableData, error) {
+	var rfqRequests []*types.SignableData
+
+	it := bc.rfqRequestsTable.NewIterator(nil, nil)
+	defer it.Release()
+
+	for it.Next() {
+		// Decode the transaction data from the iterator
+		txData := it.Value()
+
+		fmt.Printf("txData: %x\n", txData)
+
+		// Create a new transaction
+		var rfqRequest *types.SignableData
+		buf := bytes.NewReader(txData)
+		if err := rlp.Decode(buf, &rfqRequest); err != nil {
+			return nil, fmt.Errorf("error decoding transaction: %w", err)
+		}
+
+		fmt.Printf("rfqRequest: %+v\n", rfqRequest)
+		// Use the Transaction struct's DecodeRLP method to decode the data
+		rfqRequests = append(rfqRequests, rfqRequest)
+	}
+
+	// Return any potential iteration error
+	if err := it.Error(); err != nil {
+		return nil, fmt.Errorf("error iterating over transactions: %w", err)
+	}
+
+	return rfqRequests, nil
+}
+
+func (bc *Blockchain) addBlockWithoutValidation(b *types.Block) error {
+	bc.lock.Lock()
+	bc.headers = append(bc.headers, b.Header())
+	// write the block which includes all transactions to the kv store
 	rawdb.WriteBlock(bc.db, b)
+
 	bc.lock.Unlock()
 	bc.logger.Log("msg", "Block saved to the kv store", "hash", b.Hash(), "height", b.Height().String(), "txs", len(b.Transactions()))
 
-	// Also store the block header separately.
-	// key := append(append([]byte("h"), encodeBlockNumber(number)...), blockKey...)
-
-	// headerKey := append(blockKey, byte{"header"})
-	// err = db.Put(headerKey, rlp.EncodeToBytes(block.Header()))
-	// if err != nil {
-	// 	log.Fatalf("Failed to write block header: %v", err)
-	// }
-
-	// bc.blockStore[b.Hash(BlockHasher{})] = b
-
-	for _, tx := range b.Transactions() {
-		rawdb.WriteTransaction(bc.db, tx)
-		fmt.Printf("TODO: save these transactions in db: %+v\n", tx)
-		// bc.txStore[tx.Hash()] = tx
-		// fmt.Printf("TODO: save these transactions in db: %+v\n", tx)
-	}
-
-	// bc.lock.Unlock()
 	bc.currentBlock.Store(b.Header())
 
 	if len(bc.headers) == 1 {
@@ -228,7 +342,9 @@ func (bc *Blockchain) addBlockWithoutValidation(b *types.Block) error {
 
 	bc.logger.Log(
 		"msg", "BlockAdd",
-		"hash", b.Hash(),
+		"blockhash", b.Hash(),
+		"parent", b.ParentHash(),
+		"headerHash", b.Header().Hash(),
 		"height", b.Height().String(),
 		"txs", len(b.Transactions()),
 	)

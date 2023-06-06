@@ -1,4 +1,4 @@
-package db
+package rfqdb
 
 // Iterator iterates over a database's key/value pairs in ascending key order.
 //

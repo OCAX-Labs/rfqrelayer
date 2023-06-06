@@ -48,7 +48,7 @@ type RfqMsg struct {
 	Data    RfqData `json:"data"`
 }
 
-type QuoteData struct {
+type QuoteDatMsg struct {
 	// the id of the RFQ this quote is responding to
 	RfqId string `json:"rfq_id"`
 
