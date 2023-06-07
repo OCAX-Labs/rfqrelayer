@@ -79,6 +79,8 @@ func (tx *Transaction) EncodeRLP(w io.Writer) error {
 	if err := tx.encodeTyped(buf); err != nil {
 		return err
 	}
+
+	fmt.Printf("Encoded transaction: %x\n", buf.Bytes())
 	return rlp.Encode(w, buf.Bytes())
 }
 
@@ -115,6 +117,7 @@ func (tx *Transaction) encodeTyped(w *bytes.Buffer) error {
 // UnmarshalBinary decodes the canonical encoding of transactions.
 // It supports legacy RLP transactions and EIP2718 typed transactions.
 func (tx *Transaction) UnmarshalBinary(b []byte) error {
+
 	inner, err := tx.decodeTyped(b)
 	if err != nil {
 		return err

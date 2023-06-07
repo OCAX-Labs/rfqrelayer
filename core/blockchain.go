@@ -22,7 +22,7 @@ type ChainInterface interface {
 	GetBlockByHash(hash common.Hash) (*types.Block, error)
 	GetBlock(height *big.Int) (*types.Block, error)
 	GetBlockHeader(height *big.Int) (*types.Header, error)
-	GetRFQRequests() ([]*types.SignableData, error)
+	GetRFQRequests() ([]*types.RFQRequest, error)
 	WriteRFQTxs(tx *types.Transaction) error
 
 	// GetLatestBlock() *types.Block
@@ -267,10 +267,27 @@ func (bc *Blockchain) WriteRFQTxs(tx *types.Transaction) error {
 	// the validator node.
 	switch tx.Type() {
 	case types.RFQRequestTxType:
+		// get the raw signature values
+		v, r, s := tx.RawSignatureValues()
+
+		rfqRequest := &types.RFQRequest{
+			From: *tx.From(),
+			Data: tx.RFQData(),
+			V:    v,
+			R:    r,
+			S:    s,
+		}
+
+		// encode the RFQ request to RLP
+		encRFQ := new(bytes.Buffer)
+		if err := rfqRequest.EncodeRLP(encRFQ); err != nil {
+			return err
+		}
+
 		// for the original RFQ request we use the hash of the transaction as the key
 		// as all other transaction types refer to this RFQ they will be saved in their
 		// respective tables with the same key
-		err = bc.rfqRequestsTable.Put(tx.Hash().Bytes(), tx.Data())
+		err = bc.rfqRequestsTable.Put(tx.Hash().Bytes(), encRFQ.Bytes())
 	case types.OpenRFQTxType:
 		err = bc.openRFQSTable.Put(tx.ReferenceTxHash().Bytes(), tx.Data())
 	case types.ClosedRFQTxType:
@@ -291,28 +308,22 @@ func (bc *Blockchain) WriteRFQTxs(tx *types.Transaction) error {
 	return nil
 }
 
-func (bc *Blockchain) GetRFQRequests() ([]*types.SignableData, error) {
-	var rfqRequests []*types.SignableData
+func (bc *Blockchain) GetRFQRequests() ([]*types.RFQRequest, error) {
+	var rfqRequests []*types.RFQRequest
 
 	it := bc.rfqRequestsTable.NewIterator(nil, nil)
 	defer it.Release()
 
 	for it.Next() {
-		// Decode the transaction data from the iterator
+		// Decode the RLP-encoded transaction data from the iterator
 		txData := it.Value()
 
-		fmt.Printf("txData: %x\n", txData)
-
-		// Create a new transaction
-		var rfqRequest *types.SignableData
-		buf := bytes.NewReader(txData)
-		if err := rlp.Decode(buf, &rfqRequest); err != nil {
-			return nil, fmt.Errorf("error decoding transaction: %w", err)
+		var rfqRequest types.RFQRequest
+		if err := rlp.DecodeBytes(txData, &rfqRequest); err != nil {
+			return nil, fmt.Errorf("error decoding RFQRequest: %w", err)
 		}
 
-		fmt.Printf("rfqRequest: %+v\n", rfqRequest)
-		// Use the Transaction struct's DecodeRLP method to decode the data
-		rfqRequests = append(rfqRequests, rfqRequest)
+		rfqRequests = append(rfqRequests, &rfqRequest)
 	}
 
 	// Return any potential iteration error

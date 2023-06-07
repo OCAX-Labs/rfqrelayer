@@ -68,7 +68,7 @@ func (tx *Transaction) MarshalJSON() ([]byte, error) {
 	case *RFQRequest:
 		enc.From = tx.From()
 		// Serialize the SignableData into bytes.
-		dataBytes, err := itx.Data.MarshalJSON()
+		dataBytes, err := itx.Data.JSON()
 		if err != nil {
 			return nil, err
 		}

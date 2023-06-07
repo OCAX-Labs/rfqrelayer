@@ -12,6 +12,7 @@ import (
 	"github.com/OCAX-labs/rfqrelayer/common"
 	"github.com/OCAX-labs/rfqrelayer/core/types"
 	cryptoocax "github.com/OCAX-labs/rfqrelayer/crypto/ocax"
+	"github.com/OCAX-labs/rfqrelayer/utils"
 )
 
 type TransactionWrapper struct {
@@ -41,9 +42,11 @@ func main() {
 	amountTokens := big.NewInt(199)
 	amountTokens = amountTokens.Mul(amountTokens, big.NewInt(1e18)) // add 18 decimals
 
+	uid := utils.GenerateRandomStringID(10)
+
 	// Create an instance of SignableData
 	signableData := types.SignableData{
-		RequestorId:     "119",
+		RequestorId:     uid,
 		BaseTokenAmount: amountTokens,
 		BaseToken: &types.BaseToken{
 			Address:  common.HexToAddress("0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"),

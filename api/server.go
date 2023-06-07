@@ -63,6 +63,14 @@ type Block struct {
 	TxResponse TxResponse
 }
 
+type RFQRequest struct {
+	From string
+	Data string
+	V    *big.Int
+	R    *big.Int
+	S    *big.Int
+}
+
 type Header struct {
 	Version        uint64      `json:"version" gencodec:"required"`
 	TxHash         common.Hash `json:"txRoot" gencodec:"required"`
@@ -199,7 +207,31 @@ func (s *Server) handleGetRFQRequests(c echo.Context) error {
 	if err != nil {
 		return c.JSON(http.StatusBadRequest, APIError{Error: err.Error()})
 	}
-	return c.JSON(http.StatusOK, rfqRequests)
+
+	return c.JSON(http.StatusOK, intoJSONRFQ(rfqRequests))
+}
+
+func intoJSONRFQ(rfqRequests []*types.RFQRequest) []RFQRequest {
+	rfqRequestsJSON := make([]RFQRequest, len(rfqRequests))
+	for i, rfqRequest := range rfqRequests {
+		rfqRequestsJSON[i] = intoJSONRFQRequest(rfqRequest)
+	}
+	return rfqRequestsJSON
+}
+
+func intoJSONRFQRequest(rfqRequest *types.RFQRequest) RFQRequest {
+	dataJson, err := rfqRequest.Data.JSON()
+	if err != nil {
+		panic(err)
+	}
+
+	return RFQRequest{
+		From: rfqRequest.From.Hex(),
+		Data: string(dataJson),
+		V:    rfqRequest.V,
+		R:    rfqRequest.R,
+		S:    rfqRequest.S,
+	}
 }
 
 func intoJSONBlock(block *types.Block) Block {
@@ -281,9 +313,11 @@ func (s *Server) handleWsConnections(c echo.Context) error {
 }
 
 func (s *Server) BroadcastOpenRFQ(openRFQ *types.OpenRFQ) {
+	fmt.Println("WEBSOCKETS: broadcasting open RFQ")
 	data, err := json.Marshal(openRFQ) // Replace with your RFQRequest marshalling code
+
 	if err != nil {
-		s.Logger.Log("level", "error", "error", err)
+		s.Logger.Log("level", "error", "broadcasterror", err)
 		return
 	}
 
@@ -295,125 +329,3 @@ func (s *Server) BroadcastOpenRFQ(openRFQ *types.OpenRFQ) {
 		}
 	}
 }
-
-// func (tx *Transaction) Validate() error {
-
-// 	// Logic here to unwrap the transaction wrapper and validate the fields
-// 	fmt.Println("Unwrapping and validating transaction wrapper")
-
-// 	if err := r.validateRequestorId(); err != nil {
-// 		return err
-// 	}
-
-// 	// if err := validateAddress(common.HexToAddress(r.inner.From()); err != nil {
-// 	// 	return err
-// 	// }
-
-// 	// if err := r.validateBaseToken(); err != nil {
-// 	// 	return err
-// 	// }
-
-// 	// if err := r.validateQuoteToken(); err != nil {
-// 	// 	return err
-// 	// }
-
-// 	// Repeat similar validations for other fields...
-// 	return nil
-// }
-
-// func (r *types.Transaction) validateRequestorId() error {
-// 	// Logic here to validate the requestor ID field
-
-// 	// match, _ := regexp.MatchString("^[0-9]+$", r.RequestorId)
-// 	// if !match {
-// 	// 	return errInvalidRequestorId
-// 	// }
-// 	return nil
-// }
-
-// func (r *types.Transaction) validateBaseToken() error {
-// 	// Logic here    to check and validate that the quote token details are correct
-// 	// TODO: Once onboarding requirements are finalized we can add more validation here
-
-// 	// Check that the quote token address is a valid Ethereum address
-// 	// if err := validateAddress(r.Data.BaseToken.Address); err != nil {
-// 	// 	return err
-// 	// }
-
-// 	// // // Check that the quote token symbol is not empty
-// 	// if r.Data.BaseToken.Symbol == "" {
-// 	// 	return errors.New("base token symbol cannot be empty")
-// 	// }
-
-// 	// // // check decimals
-// 	// if r.Data.BaseToken.Decimals > 18 {
-// 	// 	return errors.New("base token decimals must be between 0 and 18")
-// 	// }
-
-// 	return nil
-// }
-
-// func (r *types.Transaction) validateQuoteToken() error {
-// 	// Logic here    to check and validate that the quote token details are correct
-// 	// TODO: Once onboarding requirements are finalized we can add more validation here
-
-// 	// Check that the quote token address is a valid Ethereum address
-// 	// if err := validateAddress(r.Data.QuoteToken.Address); err != nil {
-// 	// 	return err
-// 	// }
-
-// 	// // // Check that the quote token symbol is not empty
-// 	// if r.Data.QuoteToken.Symbol == "" {
-// 	// 	return errors.New("quote token symbol cannot be empty")
-// 	// }
-
-// 	// // // check decimals
-// 	// if r.Data.QuoteToken.Decimals > 18 {
-// 	// 	return errors.New("quote token decimals must be between 0 and 18")
-// 	// }
-
-// 	return nil
-// }
-
-// func (r *TransactionWrapper) createTransactionFromRequest() *types.Transaction {
-// 	fmt.Println("creating transaction from request")
-// 	// fmt.Printf(" from: %s\n", common.HexToAddress(r.From).String())
-// 	// from := common.HexToAddress(r.From)
-// 	// data := r.Data
-// 	// signature := &cryptoocax.Signature{
-// 	// 	V: &r.V.Int,
-// 	// 	R: &r.R.Int,
-// 	// 	S: &r.S.Int,
-// 	// }
-
-// 	// rfqRequest := types.NewRFQRequest(from, &data)
-// 	// tx := types.NewTx(rfqRequest)
-// 	// signer := types.NewSigner()
-// 	// signedTx, err := tx.WithSignature(signer, signature.ToBytes())
-// 	// if err != nil {
-// 	// 	fmt.Println("error signing transaction", err)
-// 	// 	return nil
-// 	// }
-
-// 	// fmt.Printf("signed tx: %v\n", signedTx)
-// 	// // Logic here to create a transaction from the request data
-// 	return &types.Transaction{}
-// }
-
-// func validateAddress(addr common.Address) error {
-// 	if !common.IsHexAddress(addr.String()) {
-// 		return errInvalidAddress
-// 	}
-
-// 	// check if the address has mixed case, then it should be checksum
-// 	if hasMixedCase(addr.String()) && !common.IsHexAddress(addr.Hex()) {
-// 		return errInvalidChecksum
-// 	}
-
-// 	return nil
-// }
-
-// // helper function to determine if the address has mixed case
-// func hasMixedCase(s string) bool {
-// 	return strings.ToLower(s) != s && strings.ToUpper(s) != s
-// }

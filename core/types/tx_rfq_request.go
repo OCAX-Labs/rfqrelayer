@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log"
 	"math/big"
 	"strings"
@@ -105,7 +106,7 @@ func (t *Token) UnmarshalJSON(input []byte) error {
 }
 
 func (d *SignableData) MarshalJSON() ([]byte, error) {
-	return json.Marshal(struct {
+	data := struct {
 		RequestorId     string     `json:"requestorId"`
 		BaseTokenAmount *big.Int   `json:"baseTokenAmount"`
 		BaseToken       *BaseToken `json:"baseToken"`
@@ -117,7 +118,15 @@ func (d *SignableData) MarshalJSON() ([]byte, error) {
 		BaseToken:       d.BaseToken,
 		QuoteToken:      d.QuoteToken,
 		RFQDurationMs:   d.RFQDurationMs,
-	})
+	}
+
+	// Marshal the struct to JSON without escaping
+	rawData, err := json.Marshal(data)
+	if err != nil {
+		return nil, err
+	}
+
+	return rawData, nil
 }
 
 func (d *SignableData) UnmarshalJSON(input []byte) error {
@@ -196,6 +205,14 @@ func (r *RFQRequest) UnmarshalJSON(input []byte) error {
 	return nil
 }
 
+func (s *SignableData) JSON() ([]byte, error) {
+	buffer := &bytes.Buffer{}
+	encoder := json.NewEncoder(buffer)
+	encoder.SetEscapeHTML(false)
+	err := encoder.Encode(s)
+	return buffer.Bytes(), err
+}
+
 func NewRFQRequest(from common.Address, data *SignableData) *RFQRequest {
 
 	return &RFQRequest{
@@ -242,6 +259,46 @@ func (tx *RFQRequest) copy() TxData {
 	cpy.Data = &dataFields
 
 	return cpy
+}
+
+func (rf *RFQRequest) EncodeRLP(w io.Writer) error {
+	return rlp.Encode(w, []interface{}{rf.From, rf.Data, rf.V, rf.R, rf.S})
+}
+
+func (rfq *RFQRequest) DecodeRLP(st *rlp.Stream) error {
+	// Start reading List
+	_, err := st.List()
+	if err != nil {
+		return err
+	}
+
+	var from common.Address
+	if err := st.Decode(&from); err != nil {
+		return err
+	}
+	rfq.From = from
+
+	var data SignableData
+	if err := st.Decode(&data); err != nil {
+		return err
+	}
+	rfq.Data = &data
+
+	var v, r, s *big.Int
+	if err := st.Decode(&v); err != nil {
+		return err
+	}
+	rfq.V = v
+	if err := st.Decode(&r); err != nil {
+		return err
+	}
+	rfq.R = r
+	if err := st.Decode(&s); err != nil {
+		return err
+	}
+	rfq.S = s
+
+	return st.ListEnd()
 }
 
 func (tx *RFQRequest) from() *common.Address { return &tx.From }

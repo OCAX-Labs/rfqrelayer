@@ -15,7 +15,7 @@ import (
 
 type RFQData struct {
 	RFQTxHash          common.Hash    `json:"rfqTxHash"`
-	RFQRequest         SignableData   `json:"rfqRequest"`
+	RFQRequest         *SignableData  `json:"rfqRequest"`
 	RFQStartTime       int64          `json:"rfqStartTime"` // this will hold a Unix timestamp
 	RFQEndTime         int64          `json:"rfqEndTime"`   // this will hold a Unix timestamp
 	SettlementContract common.Address `json:"settlementContract"`
@@ -109,7 +109,7 @@ func (tx *OpenRFQ) data() []byte {
 }
 
 func (tx *OpenRFQ) rfqData() *SignableData {
-	return &tx.Data.RFQRequest
+	return tx.Data.RFQRequest
 }
 
 // the hash of the underlying RFQRquest transaction that led to this OpenRFQ

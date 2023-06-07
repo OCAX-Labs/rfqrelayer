@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/gob"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"math/big"
@@ -300,26 +299,18 @@ func (s *Server) handleRFQRequest(event types.TxEvent) {
 	// and the start and end times of the RFQ.
 	// MMS will need to submit quotes before the RFQ end time.
 	// This event is triggered when a new RFQRequest transaction is received on the chain.
-	fmt.Printf("HHHHHHHHHHHHHHHHH Received RFQRequest [%+v]\n", event)
 	tx, ok := event.Transaction.(*types.Transaction)
 	if !ok {
 		s.Logger.Log("msg", "Failed to cast Transaction to Transaction", "hash", event.TxHash)
 		return
 	}
 
-	var rfq *types.SignableData
-	err := json.Unmarshal(tx.Data(), &rfq)
-	if err != nil {
-		s.Logger.Log("msg", "Failed to unmarshal RFQRequest", "err", err)
-		return
-	}
-
 	// Create an OpenRFQ transaction and broadcast it to the network
 
-	openRFQData := createOpenRFQData(rfq, event.TxHash)
+	openRFQData := createOpenRFQData(tx, event.TxHash)
 	currentTime := time.Now().Unix()
 	openRFQData.RFQStartTime = currentTime
-	openRFQData.RFQEndTime = currentTime + int64(rfq.RFQDurationMs)
+	openRFQData.RFQEndTime = currentTime + int64(tx.RFQData().RFQDurationMs)
 	newOpenRfq := types.NewOpenRFQ(s.ServerOptions.PrivateKey.PublicKey().Address(), openRFQData)
 	txOpenRfq := types.NewTx(newOpenRfq)
 	signedTx, err := txOpenRfq.Sign(*s.ServerOptions.PrivateKey)
@@ -349,11 +340,11 @@ func (s *Server) handleRFQRequest(event types.TxEvent) {
 
 }
 
-func createOpenRFQData(rfq *types.SignableData, txHash common.Hash) *types.RFQData {
-	fmt.Printf("ZZZZZZZZZZZZZZZ Creating OpenRFQData %+v\n", rfq)
+func createOpenRFQData(rfq *types.Transaction, txHash common.Hash) *types.RFQData {
+	fmt.Printf("Creating OpenRFQData %+v\n", rfq)
 	return &types.RFQData{
 		RFQTxHash:          txHash,
-		RFQRequest:         *rfq,
+		RFQRequest:         rfq.RFQData(),
 		RFQStartTime:       0,
 		RFQEndTime:         0,
 		SettlementContract: common.HexToAddress("0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"),

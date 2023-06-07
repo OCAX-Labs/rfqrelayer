@@ -2,6 +2,8 @@ package utils
 
 import (
 	"crypto/rand"
+	"encoding/hex"
+	"log"
 	"math/big"
 
 	"testing"
@@ -21,6 +23,18 @@ func RandomBytes(size int) []byte {
 
 func RandomHash() common.Hash {
 	return common.HashFromBytes(RandomBytes(32))
+}
+
+// GenerateRandomStringID generates a random hexadecimal string of length n.
+func GenerateRandomStringID(n int) string {
+	b := make([]byte, n)
+	_, err := rand.Read(b)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	id := hex.EncodeToString(b)
+	return id[:n] // return the first n characters
 }
 
 // NewRandomTransaction return a new random transaction without signature.
