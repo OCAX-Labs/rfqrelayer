@@ -133,6 +133,14 @@ func DeserializeSig(sigBytes []byte) (*Signature, error) {
 	return &Signature{R: r, S: s, V: v}, nil
 }
 
+func PrivateKeyFromBytes(privKeyBytes []byte) (*PrivateKey, error) {
+	privKeyECDSA, err := crypto.ToECDSA(privKeyBytes)
+	if err != nil {
+		return nil, err
+	}
+	return &PrivateKey{key: privKeyECDSA}, nil
+}
+
 func (sig *Signature) Verify(pubkey PublicKey, data []byte) bool {
 	validate := validate(pubkey, sig.ToBytes(), data)
 

@@ -98,11 +98,17 @@ func NewServer(options ServerOptions) (*Server, error) {
 		panic(fmt.Sprintf("failed to delete test database directory: %v", err))
 	}
 
-	// Create the database
-	db, err := pebble.New(dbPath, cache, handles, "rfq", readonly)
+	db, err := func() (*pebble.Database, error) {
+		err := deleteDirectoryIfExists(dbPath)
+		if err != nil {
+			return nil, fmt.Errorf("failed to delete test database directory: %v", err)
+		}
+		return pebble.New(dbPath, cache, handles, "rfq", readonly)
+	}()
 	if err != nil {
 		return nil, err
 	}
+	defer db.Close()
 
 	chain, err := core.NewBlockchain(options.Logger, genesisBlock(), db, options.PrivateKey != nil)
 	if err != nil {
@@ -214,9 +220,10 @@ func (s *Server) Start() {
 		go s.listenToTxEvents()
 	}
 
+	errors := make(chan error)
+
 free:
 	for {
-		errors := make(chan error)
 		select {
 		case peer := <-s.peerCh:
 			s.peerMap[peer.conn.RemoteAddr()] = peer
@@ -237,8 +244,6 @@ free:
 			if err := s.processTransaction(tx); err != nil {
 				s.Logger.Log("TX err", err)
 			}
-
-			// s.WriteToTables(tx)
 
 			s.Logger.Log("msg", "new transaction received", "tx", tx)
 		case rpc := <-s.rpcCh:

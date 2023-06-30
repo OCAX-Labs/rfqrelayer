@@ -241,14 +241,41 @@ func RandomHash() common.Hash {
 	return common.HashFromBytes(RandomBytes(32))
 }
 
+func randBigInt(n int) (*big.Int, error) {
+	max := new(big.Int)
+	max.Exp(big.NewInt(2), big.NewInt(int64(n*8)), nil).Sub(max, big.NewInt(1))
+	randNum, err := rand.Int(rand.Reader, max)
+	if err != nil {
+		return nil, err
+	}
+	return randNum, nil
+}
+
 // NewRandomTransaction return a new random transaction without signature.
 func randomTx(pubKey cryptoocax.PublicKey) *types.Transaction {
 	from := pubKey.Address()
+	baseToken := &types.Token{
+		Symbol:   "MKR",
+		Decimals: 18,
+		Address:  common.HexToAddress("0x9f8F72aA9304c8B593d555F12eF6589cC3A579A2"),
+	}
+	quoteToken := &types.Token{
+		Symbol:   "WETH",
+		Decimals: 18,
+		Address:  common.HexToAddress("0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2"),
+	}
 	// rand, err := rand.Int(rand.Reader, big.NewInt(100000000))
 	// rand, err := rand.Int(rand.Reader, big.NewInt(100000000))	// if err != nil {
 	// 	panic(err)
 	// }
-	data := types.SignableData{}
+	baseAmount, _ := randBigInt(256)
+	data := types.SignableData{
+		RequestorId:     "abc1",
+		BaseTokenAmount: baseAmount,
+		BaseToken:       baseToken,
+		QuoteToken:      quoteToken,
+		RFQDurationMs:   5000,
+	}
 
 	inner := &types.RFQRequest{
 		From: from,

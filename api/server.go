@@ -139,6 +139,15 @@ func (s *Server) handlePostTx(c echo.Context) error {
 	// to allow fast access to the db
 	s.bc.WriteRFQTxs(txRequest)
 
+	// Now that the RFQ is validated we can create an "auction wrapper" used to receive that auctions quotes from the blockchain
+	// this wrapper is an OpenRFQ struct that is stored in the db with a copy kept in memory the OpenRFQ can only be updated by quotes submitted
+	// before the RFQ deadline - once the deadline is reached the openRFQ is closed and the records are sent to the matching engine - for determining
+	// the best auction quotes
+
+	// openRFQ := types.NewOpenRFQ(txRequest)
+
+	// s.c
+
 	// Broadcast to the blockchain
 	s.txChan <- txRequest
 
