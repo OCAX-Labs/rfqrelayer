@@ -27,7 +27,7 @@ func main() {
 	checkSumAddr := addr.Hex()
 	addr = common.HexToAddress(checkSumAddr)
 
-	amountTokens := big.NewInt(199)
+	amountTokens := big.NewInt(550)
 	amountTokens = amountTokens.Mul(amountTokens, big.NewInt(1e18)) // add 18 decimals
 
 	uid := utils.GenerateRandomStringID(10)
@@ -36,8 +36,8 @@ func main() {
 		RequestorId:     uid,
 		BaseTokenAmount: amountTokens,
 		BaseToken: &types.BaseToken{
-			Address:  common.HexToAddress("0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"),
-			Symbol:   "VFG",
+			Address:  common.HexToAddress("0x9f8F72aA9304c8B593d555F12eF6589cC3A579A2"),
+			Symbol:   "MKR",
 			Decimals: 18,
 		},
 		QuoteToken: &types.QuoteToken{

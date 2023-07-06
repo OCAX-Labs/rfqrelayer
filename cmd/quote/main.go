@@ -6,7 +6,9 @@ import (
 	"fmt"
 	"log"
 	"math/big"
+	"math/rand"
 	"net/http"
+	"time"
 
 	"github.com/OCAX-labs/rfqrelayer/common"
 	"github.com/OCAX-labs/rfqrelayer/core/types"
@@ -50,7 +52,10 @@ func main() {
 	quoteTokenSymbol := quoteToken["symbol"].(string)
 	baseTokenDecimals := uint64(baseToken["decimals"].(float64))
 	quoteTokenDecimals := uint64(quoteToken["decimals"].(float64))
-	baseTokenAmount := big.NewInt(int64(rfqRequest["baseTokenAmount"].(float64)))
+	baseTokenAmountFloat := big.NewFloat(rfqRequest["baseTokenAmount"].(float64))
+	baseTokenAmount := new(big.Int)
+	baseTokenAmountFloat.Int(baseTokenAmount) //
+	bidPrice, askPrice := generateRandomPrice(1500)
 
 	quoteData := types.QuoteData{
 		QuoterId:        result["from"].(string),
@@ -67,7 +72,8 @@ func main() {
 			Decimals: quoteTokenDecimals,
 		},
 		BaseTokenAmount:      baseTokenAmount,
-		QuoteTokenAmount:     big.NewInt(0),
+		BidPrice:             bidPrice,
+		AskPrice:             askPrice,
 		EncryptionPublicKeys: []*cryptoocax.PublicKey{},
 	}
 
@@ -95,7 +101,8 @@ func main() {
 				"decimals": %d
 			},
 			"baseTokenAmount": %d,
-			"quoteTokenAmount": %d,
+			"bidPrice": %d,
+			"askPrice": %d,
 			"encryptionPublicKeys": []
 		},
 		"v": %d,
@@ -113,9 +120,40 @@ func main() {
 		quoteData.QuoteToken.Symbol,
 		quoteData.QuoteToken.Decimals,
 		quoteData.BaseTokenAmount,
-		quoteData.QuoteTokenAmount,
+		quoteData.BidPrice,
+		quoteData.AskPrice,
 		v,
 		r,
 		s,
 	)
+}
+
+// helper function to generate random bid and ask prices
+// the function takes an integer (i) as input and returns a random number that
+// is between 0.9*i and 1.1*i the returned number is then converted to a big Int
+// and multiplied by 1e18 to add 18 decimals
+
+var rng = rand.New(rand.NewSource(time.Now().UnixNano()))
+
+func generateRandomPrice(indic int) (bid *big.Int, ask *big.Int) {
+	lower := 0.9 * float64(indic)
+	upper := 1.1 * float64(indic)
+	// generate random number between 0.9*indic and 1.1*indic
+	randPrice := rng.Float64()*(upper-lower) + lower
+	bidPrice := 0.95 * randPrice
+
+	// convert to big int and add 18 decimals
+	askFloat := big.NewFloat(randPrice)
+	askMultiplier := big.NewFloat(1e18)
+	askProduct := new(big.Float).Mul(askFloat, askMultiplier)
+	ask = new(big.Int)
+	askProduct.Int(ask) // convert to *big.Int, ignoring any fractional part
+
+	bidFloat := big.NewFloat(bidPrice)
+	bidMultiplier := big.NewFloat(1e18)
+	bidProduct := new(big.Float).Mul(bidFloat, bidMultiplier)
+	bid = new(big.Int)
+	bidProduct.Int(bid) // convert to *big.Int, ignoring any fractional part
+
+	return bid, ask
 }

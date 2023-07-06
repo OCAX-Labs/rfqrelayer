@@ -134,7 +134,7 @@ func (s *Server) Start() error {
 	e.POST("/rfqs", s.handlePostRFQRequest)
 	e.GET("/openRFQs", s.handleGetOpenRFQRequests)
 	e.GET("/openRFQs/:txHash", s.handleGetOpenRFQRequest)
-	e.POST("/quotes/:rfqTxHash", s.handlePostQuote)
+	e.POST("/quotes", s.handlePostQuote)
 
 	// websockets for broadcast of RFQRequest
 	e.GET("/ws", s.handleWsConnections)
@@ -287,23 +287,7 @@ func (s *Server) handlePostRFQRequest(c echo.Context) error {
 }
 
 func (s *Server) handlePostQuote(c echo.Context) error {
-	rfqTxHash := c.Param("rfqTxHash")
-	b, err := hex.DecodeString(rfqTxHash)
-	if err != nil {
-		return c.JSON(http.StatusBadRequest, APIError{Error: err.Error()})
-	}
 	quoteDataBody := new(QuoteBody)
-
-	rfqHash := common.HashFromBytes(b)
-	openRFQ, err := s.bc.GetOpenRFQByHash(rfqHash)
-	if err != nil {
-		return c.JSON(http.StatusBadRequest, APIError{Error: "RFQ does not exist or has already expired"})
-	}
-
-	if time.Now().Unix() > openRFQ.Data.RFQEndTime {
-		return c.JSON(http.StatusBadRequest, APIError{Error: "RFQ is no longer open"})
-	}
-
 	body, err := ioutil.ReadAll(c.Request().Body)
 	if err != nil {
 		return c.JSON(http.StatusBadRequest, APIError{Error: err.Error()})
@@ -312,6 +296,14 @@ func (s *Server) handlePostQuote(c echo.Context) error {
 	err = json.Unmarshal(body, quoteDataBody)
 	if err != nil {
 		return c.JSON(http.StatusBadRequest, APIError{Error: err.Error()})
+	}
+	rfqTxHash := quoteDataBody.Data.RFQTxHash
+	openRFQ, err := s.bc.GetOpenRFQByHash(rfqTxHash)
+	if err != nil {
+		return c.JSON(http.StatusBadRequest, APIError{Error: "RFQ does not exist or has already expired"})
+	}
+	if time.Now().Unix() > openRFQ.Data.RFQEndTime {
+		return c.JSON(http.StatusBadRequest, APIError{Error: "RFQ is no longer open"})
 	}
 
 	quoteData := quoteDataBody.Data
@@ -327,7 +319,7 @@ func (s *Server) handlePostQuote(c echo.Context) error {
 
 	// Add the quote to the RFQ
 	// update the openRFQ in memory
-	s.bc.UpdateActiveRFQ(rfqHash, quote)
+	s.bc.UpdateActiveRFQ(rfqTxHash, quote)
 
 	return c.JSON(http.StatusCreated, openRFQ)
 }

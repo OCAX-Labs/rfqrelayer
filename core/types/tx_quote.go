@@ -21,7 +21,8 @@ type QuoteData struct {
 	BaseToken            *Token                  `json:"baseToken"`
 	QuoteToken           *Token                  `json:"quoteToken"`
 	BaseTokenAmount      *big.Int                `json:"baseTokenAmount"`
-	QuoteTokenAmount     *big.Int                `json:"quoteTokenAmount"`
+	BidPrice             *big.Int                `json:"bidPrice"`
+	AskPrice             *big.Int                `json:"askPrice"`
 	EncryptionPublicKeys []*cryptoocax.PublicKey `json:"encryptionPublicKeys"`
 }
 
@@ -156,15 +157,21 @@ func (qd *QuoteData) FromInterfaces(data []interface{}) error {
 	}
 	baseTokenAmount := new(big.Int).SetBytes(baseTokenAmountBytes)
 
-	quoteTokenAmountBytes, ok := data[6].([]byte)
+	bidPriceBytes, ok := data[6].([]byte)
 	if !ok {
-		return fmt.Errorf("invalid quoteTokenAmount type %T", data[6])
+		return fmt.Errorf("invalid bidPrice type %T", data[6])
 	}
-	quoteTokenAmount := new(big.Int).SetBytes(quoteTokenAmountBytes)
+	bidPrice := new(big.Int).SetBytes(bidPriceBytes)
 
-	encryptionPublicKeysInterface, ok := data[7].([]interface{})
+	askPriceBytes, ok := data[7].([]byte)
 	if !ok {
-		return fmt.Errorf("invalid encryptionPublicKeys type %T", data[7])
+		return fmt.Errorf("invalid askPrice type %T", data[7])
+	}
+	askPrice := new(big.Int).SetBytes(askPriceBytes)
+
+	encryptionPublicKeysInterface, ok := data[8].([]interface{})
+	if !ok {
+		return fmt.Errorf("invalid encryptionPublicKeys type %T", data[8])
 	}
 
 	var encryptionPublicKeys []*cryptoocax.PublicKey
@@ -188,7 +195,8 @@ func (qd *QuoteData) FromInterfaces(data []interface{}) error {
 	qd.BaseToken = baseToken
 	qd.QuoteToken = quoteToken
 	qd.BaseTokenAmount = baseTokenAmount
-	qd.QuoteTokenAmount = quoteTokenAmount
+	qd.BidPrice = bidPrice
+	qd.AskPrice = askPrice
 	qd.EncryptionPublicKeys = encryptionPublicKeys
 
 	return nil
