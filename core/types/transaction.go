@@ -65,11 +65,17 @@ type TxData interface {
 
 	data() []byte
 
-	rfqData() *SignableData
+	// rfqData() *SignableData
+	// openRFQData() *RFQData
+	embeddedData() interface{} // returns the struct that is embedded in the transaction
 
 	rawSignatureValues() (v, r, s *big.Int)
 	setSignatureValues(v, r, s *big.Int)
 	referenceTxHash() common.Hash // add this
+}
+
+type EmbeddedData interface {
+	embeddedData()
 }
 
 func (tx *Transaction) EncodeRLP(w io.Writer) error {
@@ -182,8 +188,15 @@ func (tx *Transaction) ReferenceTxHash() common.Hash {
 	return tx.inner.referenceTxHash()
 }
 
-func (tx *Transaction) RFQData() *SignableData {
-	return tx.inner.rfqData()
+func (tx *Transaction) EmbeddedData() interface{} {
+	var txData interface{}
+	switch tx.Type() {
+	case RFQRequestTxType:
+		return tx.inner.embeddedData().(*SignableData)
+	case OpenRFQTxType:
+		return tx.inner.embeddedData().(*RFQData)
+	}
+	return txData
 }
 
 // RawSignatureValues returns the V, R, S signature values of the transaction.
@@ -197,7 +210,6 @@ func (tx *Transaction) Hash() common.Hash {
 	if hash := tx.hash.Load(); hash != nil {
 		return hash.(common.Hash)
 	}
-	fmt.Printf("Hashing transaction. Type: %d, Data: %#v\n", tx.Type(), tx.inner)
 	h := prefixedRlpHash(tx.Type(), tx.inner.data())
 	tx.hash.Store(h)
 	return h
@@ -347,8 +359,22 @@ func (tx *Transaction) Validate() error {
 		return err
 	}
 
-	if err := tx.RFQData().Validate(); err != nil {
-		return err
+	switch tx.Type() {
+	case RFQRequestTxType:
+		requestData := tx.EmbeddedData().(*SignableData)
+		if err := requestData.Validate(); err != nil {
+			return err
+		}
+	case OpenRFQTxType:
+		requestData := tx.EmbeddedData().(*RFQData)
+		if err := requestData.Validate(); err != nil {
+			return err
+		}
+	case QuoteTxType:
+		requestData := tx.EmbeddedData().(*QuoteData)
+		if err := requestData.Validate(); err != nil {
+			return err
+		}
 	}
 
 	// Repeat similar validations for other fields...

@@ -3,7 +3,6 @@ package types
 import (
 	"encoding/json"
 	"errors"
-	"fmt"
 	"math/big"
 
 	"github.com/OCAX-labs/rfqrelayer/common"
@@ -122,7 +121,6 @@ func (tx *Transaction) MarshalJSON() ([]byte, error) {
 
 // UnmarshalJSON unmarshals from JSON.
 func (tx *Transaction) UnmarshalJSON(input []byte) error {
-	fmt.Printf("UnmarshalJSON: %s\n", string(input))
 	var dec txJSON
 	if err := json.Unmarshal(input, &dec); err != nil {
 		return err

@@ -45,6 +45,48 @@ func (t Token) Validate() bool {
 	return true
 }
 
+func (t *Token) FromInterfaces(data []interface{}) error {
+	if len(data) != 3 {
+		return fmt.Errorf("invalid data length %d", len(data))
+	}
+
+	addressBytes, ok := data[0].([]byte)
+	if !ok {
+		return fmt.Errorf("invalid address type %T", data[0])
+	}
+	address := common.BytesToAddress(addressBytes)
+
+	symbolBytes, ok := data[1].([]byte)
+	if !ok {
+		return fmt.Errorf("invalid symbol type %T", data[1])
+	}
+	symbol := string(symbolBytes)
+
+	// Handle Decimals as []byte
+	decimalsBytes, ok := data[2].([]byte)
+	if !ok {
+		return fmt.Errorf("invalid decimals type %T", data[2])
+	}
+	if len(decimalsBytes) > 8 {
+		return errors.New("invalid decimals length")
+	}
+
+	// Create a new byte slice of length 8
+	newDecimalsBytes := make([]byte, 8)
+
+	// Copy decimalsBytes to the end of newDecimalsBytes
+	copy(newDecimalsBytes[8-len(decimalsBytes):], decimalsBytes)
+
+	// Convert the bytes to uint64
+	decimals := binary.BigEndian.Uint64(newDecimalsBytes)
+
+	t.Address = address
+	t.Symbol = symbol
+	t.Decimals = decimals
+
+	return nil
+}
+
 type QuoteToken = Token
 
 type BaseToken = Token
@@ -180,12 +222,11 @@ func (r *RFQRequest) UnmarshalJSON(input []byte) error {
 		S    *big.Int        `json:"s"`
 	}
 
-	decoded, err := hex.DecodeString(strings.TrimPrefix(string(input), "0x"))
+	_, err := hex.DecodeString(strings.TrimPrefix(string(input), "0x"))
 	if err != nil {
 		log.Fatal(err)
 	}
 
-	fmt.Printf("decoded: %s\n", string(decoded))
 	var rfqRequestJSON RFQRequestJSON
 	if err := json.Unmarshal(input, &rfqRequestJSON); err != nil {
 		return err
@@ -211,6 +252,25 @@ func (s *SignableData) JSON() ([]byte, error) {
 	encoder.SetEscapeHTML(false)
 	err := encoder.Encode(s)
 	return buffer.Bytes(), err
+}
+
+func (s *SignableData) Validate() error {
+	if s.RequestorId == "" {
+		return errors.New("requestorId is required")
+	}
+	if s.BaseTokenAmount == nil {
+		return errors.New("baseTokenAmount is required")
+	}
+	if s.BaseToken == nil {
+		return errors.New("baseToken is required")
+	}
+	if s.QuoteToken == nil {
+		return errors.New("quoteToken is required")
+	}
+	if s.RFQDurationMs == 0 {
+		return errors.New("rfqDurationMs is required")
+	}
+	return nil
 }
 
 func NewRFQRequest(from common.Address, data *SignableData) *RFQRequest {
@@ -347,6 +407,10 @@ func (tx *RFQRequest) rfqData() *SignableData {
 	return tx.Data
 }
 
+func (tx *RFQRequest) embeddedData() interface{} {
+	return tx.rfqData()
+}
+
 func (s *SignableData) ToBytes() ([]byte, error) {
 	buf := new(bytes.Buffer)
 	if err := rlp.Encode(buf, s); err != nil {
@@ -363,34 +427,65 @@ func (s *SignableData) ToHex() (hexutil.Bytes, error) {
 	return hexutil.Bytes(bytes), nil
 }
 
-func (s *SignableData) Validate() error {
-	if s == nil {
-		return errors.New("nil signable data")
+func (s *SignableData) FromInterfaces(data []interface{}) error {
+	if len(data) != 5 {
+		return fmt.Errorf("invalid data length %d", len(data))
 	}
 
-	// validate the RequestorId is not empty
-	if s.RequestorId == "" {
-		return errors.New("empty requestor id")
+	requestorIdBytes, ok := data[0].([]byte)
+	if !ok {
+		return fmt.Errorf("invalid requestorId type %T", data[0])
 	}
 
-	// validate the baseToken correctly specified
-	if s.BaseToken == nil {
-		return errors.New("empty base token")
+	requestorId := string(requestorIdBytes)
+
+	baseTokenAmountBytes, ok := data[1].([]byte)
+	if !ok {
+		return fmt.Errorf("invalid baseTokenAmount type %T", data[1])
+	}
+	baseTokenAmount := new(big.Int).SetBytes(baseTokenAmountBytes)
+
+	baseTokenData, ok := data[2].([]interface{})
+	if !ok {
+		return fmt.Errorf("invalid baseToken type %T", data[2])
+	}
+	baseToken := new(Token)
+	if err := baseToken.FromInterfaces(baseTokenData); err != nil {
+		return err
 	}
 
-	if !s.BaseToken.Validate() {
-		return errors.New("invalid base token")
+	quoteTokenData, ok := data[3].([]interface{})
+	if !ok {
+		return fmt.Errorf("invalid quoteToken type %T", data[3])
+	}
+	quoteToken := new(Token)
+	if err := quoteToken.FromInterfaces(quoteTokenData); err != nil {
+		return err
+	}
+	// Handle RFQDurationMs as []byte
+	rfqDurationBytes, ok := data[4].([]byte)
+	if !ok {
+		return fmt.Errorf("invalid rfqDuration type %T", data[4])
+	}
+	if len(rfqDurationBytes) > 8 {
+		return errors.New("invalid rfqDuration length")
 	}
 
-	if s.QuoteToken == nil {
-		return errors.New("empty quote token")
-	}
+	// Create a new byte slice of length 8
+	newRfqDurationBytes := make([]byte, 8)
 
-	if !s.QuoteToken.Validate() {
-		return errors.New("invalid quote token")
-	}
+	// Copy rfqDurationBytes to the end of newRfqDurationBytes
+	copy(newRfqDurationBytes[8-len(rfqDurationBytes):], rfqDurationBytes)
 
-	// Add any additional validations here
+	// Convert the bytes to uint64
+	rfqDuration := binary.BigEndian.Uint64(newRfqDurationBytes)
+
+	s.RequestorId = requestorId
+	s.BaseTokenAmount = baseTokenAmount
+	s.BaseToken = baseToken
+	s.QuoteToken = quoteToken
+	s.RFQDurationMs = rfqDuration
+
 	return nil
 }
 

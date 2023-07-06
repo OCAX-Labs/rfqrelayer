@@ -2,11 +2,12 @@ package types
 
 import (
 	"bytes"
-	"encoding/gob"
+	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"math/big"
 
 	"github.com/OCAX-labs/rfqrelayer/common"
@@ -17,7 +18,8 @@ type RFQData struct {
 	RFQTxHash          common.Hash    `json:"rfqTxHash"`
 	RFQRequest         *SignableData  `json:"rfqRequest"`
 	RFQStartTime       int64          `json:"rfqStartTime"` // this will hold a Unix timestamp
-	RFQEndTime         int64          `json:"rfqEndTime"`   // this will hold a Unix timestamp
+	RFQEndTime         int64          `json:"rfqEndTime"`
+	Quotes             []*Quote       `json:"quotes"`
 	SettlementContract common.Address `json:"settlementContract"`
 	MatchingContract   common.Address `json:"matchingContract"`
 }
@@ -49,12 +51,63 @@ type OpenRFQ struct {
 	S *big.Int `json:"s" gencodec:"required"`
 }
 
+func newRFQ() *RFQData {
+	return &RFQData{}
+}
+
 func NewOpenRFQ(from common.Address, data *RFQData) *OpenRFQ {
 
 	return &OpenRFQ{
 		Data: data,
 		From: from,
 	}
+}
+
+func (tx *OpenRFQ) MarshalJSON() ([]byte, error) {
+	return json.Marshal(struct {
+		From common.Address `json:"from"`
+		Data *RFQData       `json:"data"`
+		V    *big.Int       `json:"v"`
+		R    *big.Int       `json:"r"`
+		S    *big.Int       `json:"s"`
+	}{
+		From: tx.From,
+		Data: tx.Data,
+		V:    tx.V,
+		R:    tx.R,
+		S:    tx.S,
+	})
+}
+
+func (tx *RFQData) JSON() ([]byte, error) {
+	buffer := &bytes.Buffer{}
+	encoder := json.NewEncoder(buffer)
+	encoder.SetEscapeHTML(false)
+	err := encoder.Encode(tx)
+	return buffer.Bytes(), err
+}
+
+func (tx *OpenRFQ) UnmarshalJSON(input []byte) error {
+	type OpenRFQJSON struct {
+		From common.Address `json:"from"`
+		Data *RFQData       `json:"data"`
+		V    *big.Int       `json:"v"`
+		R    *big.Int       `json:"r"`
+		S    *big.Int       `json:"s"`
+	}
+
+	var txJSON OpenRFQJSON
+	if err := json.Unmarshal(input, &txJSON); err != nil {
+		return err
+	}
+
+	tx.From = txJSON.From
+	tx.Data = txJSON.Data
+	tx.V = txJSON.V
+	tx.R = txJSON.R
+	tx.S = txJSON.S
+
+	return nil
 }
 
 func (tx *OpenRFQ) AddSignatureToTx(sig []byte) error {
@@ -89,6 +142,7 @@ func (tx *OpenRFQ) copy() TxData {
 	// Deep copy the data.
 	dataFields, err := tx.Data.deepCopy()
 	if err != nil {
+		log.Printf("Error in function %s: %s", "someFunc", err)
 		panic(fmt.Sprintf("failed to deep copy tx data: %v", err))
 	}
 
@@ -112,6 +166,14 @@ func (tx *OpenRFQ) rfqData() *SignableData {
 	return tx.Data.RFQRequest
 }
 
+func (tx *OpenRFQ) openRFQData() *RFQData {
+	return tx.Data
+}
+
+func (tx *OpenRFQ) embeddedData() interface{} {
+	return tx.openRFQData()
+}
+
 // the hash of the underlying RFQRquest transaction that led to this OpenRFQ
 func (tx *OpenRFQ) referenceTxHash() common.Hash {
 	return tx.Data.RFQTxHash
@@ -125,18 +187,17 @@ func (tx *OpenRFQ) setSignatureValues(v, r, s *big.Int) {
 }
 
 func (r *OpenRFQ) EncodeRLP(w io.Writer) error {
-	dataBytes, err := json.Marshal(r.Data)
-	if err != nil {
-		return err
-	}
-	return rlp.Encode(w, []interface{}{r.From.Bytes(), dataBytes, r.V, r.R, r.S})
+	return rlp.Encode(w, []interface{}{r.From.Bytes(), r.Data, r.V, r.R, r.S})
 }
 
 func (r *OpenRFQ) DecodeRLP(s *rlp.Stream) error {
-	var elems []interface{}
-
-	err := s.Decode(&elems)
+	raw, err := s.Raw()
 	if err != nil {
+		return err
+	}
+
+	var elems []interface{}
+	if err := rlp.DecodeBytes(raw, &elems); err != nil {
 		return err
 	}
 
@@ -144,26 +205,155 @@ func (r *OpenRFQ) DecodeRLP(s *rlp.Stream) error {
 		return fmt.Errorf("expected 5 elements, got %d", len(elems))
 	}
 
-	if fromBytes, ok := elems[0].([]byte); ok {
-		if len(fromBytes) != len(r.From) {
-			return errors.New("wrong length for From")
-		}
-		copy(r.From[:], fromBytes)
-	} else {
-		return errors.New("invalid type for From")
+	from, ok := elems[0].([]byte)
+	if !ok {
+		return fmt.Errorf("invalid type for From")
 	}
 
-	var data RFQData
-	dataBytes, _ := elems[1].([]byte)
-	err = json.Unmarshal(dataBytes, &data)
+	if len(from) != common.AddressLength {
+		return fmt.Errorf("incorrect length for From, expected %d, got %d", common.AddressLength, len(from))
+	}
+
+	var addr common.Address
+	copy(addr[:], from)
+
+	data := &RFQData{}
+	if err := data.FromInterfaces(elems[1].([]interface{})); err != nil {
+		return fmt.Errorf("invalid type for Data: %w", err)
+	}
+
+	vBytes, ok := elems[2].([]byte)
+	if !ok {
+		return fmt.Errorf("invalid type for V")
+	}
+	v := new(big.Int).SetBytes(vBytes)
+
+	rBytes, ok := elems[3].([]byte)
+	if !ok {
+		return fmt.Errorf("invalid type for R")
+	}
+
+	sBytes, ok := elems[4].([]byte)
+	if !ok {
+		return fmt.Errorf("invalid type for S")
+	}
+
+	r.From = addr
+	r.Data = data
+	r.V = v
+	r.R = new(big.Int).SetBytes(rBytes)
+	r.S = new(big.Int).SetBytes(sBytes)
+
+	return nil
+}
+
+func (rfqData *RFQData) FromInterfaces(data []interface{}) error {
+	if len(data) != 7 {
+		return fmt.Errorf("wrong number of elements: expected 7, got %d", len(data))
+	}
+
+	rfqTxHashBytes, ok := data[0].([]byte)
+	if !ok {
+		return errors.New("data[0] is not a byte array")
+	}
+
+	if len(rfqTxHashBytes) != common.HashLength {
+		return fmt.Errorf("incorrect length for rfqTxHash, expected %d, got %d", common.HashLength, len(rfqTxHashBytes))
+	}
+
+	var rfqTxHash common.Hash
+	copy(rfqTxHash[:], rfqTxHashBytes)
+
+	rfqRequestData, ok := data[1].([]interface{})
+	if !ok {
+		return errors.New("data[1] is not a []interface{}")
+	}
+
+	rfqRequest := &SignableData{}
+	err := rfqRequest.FromInterfaces(rfqRequestData)
 	if err != nil {
-		return err
+		return fmt.Errorf("error decoding SignableData: %s", err.Error())
 	}
 
-	r.Data = &data
-	r.V, _ = elems[2].(*big.Int)
-	r.R, _ = elems[3].(*big.Int)
-	r.S, _ = elems[4].(*big.Int)
+	// Handle rfqStartTime as []byte
+	rfqStartTimeBytes, ok := data[2].([]byte)
+	if !ok {
+		return fmt.Errorf("invalid rfqStartTime type %T", data[2])
+	}
+
+	if len(rfqStartTimeBytes) > 8 {
+		return errors.New("invalid rfqStartTime length")
+	}
+
+	// Create a new byte slice of length 8
+	newRfqStartTimeBytes := make([]byte, 8)
+
+	// Copy rfqStartTimeBytes to the end of newRfqStartTimeBytes
+	copy(newRfqStartTimeBytes[8-len(rfqStartTimeBytes):], rfqStartTimeBytes)
+
+	// Convert the bytes to uint64
+	rfqStartTime := binary.BigEndian.Uint64(newRfqStartTimeBytes)
+
+	// Handle rfqStartTime as []byte
+	rfqEndTimeBytes, ok := data[3].([]byte)
+	if !ok {
+		return fmt.Errorf("invalid rfqEndTime type %T", data[3])
+	}
+
+	if len(rfqEndTimeBytes) > 8 {
+		return errors.New("invalid rfqEndTime length")
+	}
+
+	// Create a new byte slice of length 8
+	newRfqEndTimeBytes := make([]byte, 8)
+
+	// Copy rfqStartTimeBytes to the end of newRfqStartTimeBytes
+	copy(newRfqEndTimeBytes[8-len(rfqEndTimeBytes):], rfqEndTimeBytes)
+
+	// Convert the bytes to uint64
+	rfqEndTime := binary.BigEndian.Uint64(newRfqEndTimeBytes)
+
+	quoteInterfaces, ok := data[4].([]interface{})
+	if !ok {
+		return fmt.Errorf("invalid quotes type %T", data[4])
+	}
+
+	var quotes []*Quote
+
+	for _, quoteInterface := range quoteInterfaces {
+		quoteData, ok := quoteInterface.([]interface{})
+		if !ok {
+			return fmt.Errorf("invalid quote type %T", quoteInterface)
+		}
+
+		quote := &Quote{}
+		err := quote.FromInterfaces(quoteData)
+		if err != nil {
+			return fmt.Errorf("error decoding Quote: %s", err.Error())
+		}
+
+		quotes = append(quotes, quote)
+	}
+
+	settlementContractAddressBytes, ok := data[5].([]byte)
+	if !ok {
+		return fmt.Errorf("invalid address type %T", data[5])
+	}
+	settlementContractAddress := common.BytesToAddress(settlementContractAddressBytes)
+
+	matchingContractAddressBytes, ok := data[6].([]byte)
+	if !ok {
+		return fmt.Errorf("invalid address type %T", data[6])
+	}
+	matchingContractAddress := common.BytesToAddress(matchingContractAddressBytes)
+
+	rfqData.RFQTxHash = rfqTxHash
+	rfqData.RFQRequest = rfqRequest
+	rfqData.RFQStartTime = int64(rfqStartTime)
+	rfqData.RFQEndTime = int64(rfqEndTime)
+	rfqData.Quotes = quotes
+	rfqData.SettlementContract = settlementContractAddress
+	rfqData.MatchingContract = matchingContractAddress
 
 	return nil
 }
@@ -186,24 +376,75 @@ func (tx *OpenRFQ) String() string {
 		tx.S.String())
 }
 
-func (src *RFQData) deepCopy() (*RFQData, error) {
-	buf := new(bytes.Buffer)
-	enc := gob.NewEncoder(buf)
-	dec := gob.NewDecoder(buf)
+func (src *RFQData) Validate() error {
 
-	err := enc.Encode(src)
-	if err != nil {
-		return &RFQData{}, err
-	}
-
-	var copy RFQData
-	if err := dec.Decode(&copy); err != nil {
-		return &RFQData{}, err
-	}
-
-	return &copy, nil
+	return nil
 }
 
-func init() {
-	gob.Register(RFQData{})
+func (src *RFQData) EncodeRLP(w io.Writer) error {
+	byteStartTime := make([]byte, 8)
+	binary.BigEndian.PutUint64(byteStartTime, uint64(src.RFQStartTime))
+	byteEndTime := make([]byte, 8)
+	binary.BigEndian.PutUint64(byteEndTime, uint64(src.RFQEndTime))
+
+	dataToEncode := struct {
+		RFQTxHash          common.Hash
+		RFQRequest         *SignableData
+		RFQStartTime       []byte
+		RFQEndTime         []byte
+		Quotes             []*Quote
+		SettlementContract common.Address
+		MatchingContract   common.Address
+	}{
+		RFQTxHash:          src.RFQTxHash,
+		RFQRequest:         src.RFQRequest,
+		RFQStartTime:       byteStartTime,
+		RFQEndTime:         byteEndTime,
+		Quotes:             src.Quotes,
+		SettlementContract: src.SettlementContract,
+		MatchingContract:   src.MatchingContract,
+	}
+	return rlp.Encode(w, &dataToEncode)
+}
+
+func (src *RFQData) DecodeRLP(s *rlp.Stream) error {
+	var dataToDecode struct {
+		RFQTxHash          common.Hash
+		RFQRequest         *SignableData
+		RFQStartTime       []byte
+		RFQEndTime         []byte
+		Quotes             []*Quote
+		SettlementContract common.Address
+		MatchingContract   common.Address
+	}
+
+	if err := s.Decode(&dataToDecode); err != nil {
+		return err
+	}
+
+	src.RFQTxHash = dataToDecode.RFQTxHash
+	src.RFQRequest = dataToDecode.RFQRequest
+	src.RFQStartTime = int64(binary.BigEndian.Uint64(dataToDecode.RFQStartTime))
+	src.RFQEndTime = int64(binary.BigEndian.Uint64(dataToDecode.RFQEndTime))
+	src.Quotes = dataToDecode.Quotes
+	src.SettlementContract = dataToDecode.SettlementContract
+	src.MatchingContract = dataToDecode.MatchingContract
+
+	return nil
+}
+
+func (src *RFQData) deepCopy() (*RFQData, error) {
+	cpy := &RFQData{
+		RFQTxHash:          src.RFQTxHash,  // Hash is a value type
+		RFQRequest:         src.RFQRequest, // Assuming SignableData can be safely shallow-copied.
+		RFQStartTime:       src.RFQStartTime,
+		RFQEndTime:         src.RFQEndTime,
+		SettlementContract: src.SettlementContract, // Address is a value type
+		MatchingContract:   src.MatchingContract,   // Address is a value type
+	}
+
+	// Deep copy the slices// Deep copy the slices
+	cpy.Quotes = make([]*Quote, len(src.Quotes))
+	copy(cpy.Quotes, src.Quotes)
+	return cpy, nil
 }

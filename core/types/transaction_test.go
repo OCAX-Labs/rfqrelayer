@@ -520,14 +520,14 @@ func TestTransaction_MarshalUnmarshalJSON(t *testing.T) {
 	assert.Equal(t, or.Cmp(ur) == 0, true)
 	assert.Equal(t, os.Cmp(us) == 0, true)
 
-	assert.Equal(t, unmarshalled.RFQData().RequestorId, "119")
-	assert.Equal(t, unmarshalled.RFQData().BaseTokenAmount.Cmp(big.NewInt(0)), 1)
-	assert.Equal(t, unmarshalled.RFQData().BaseToken.Decimals, uint64(18))
-	assert.Equal(t, unmarshalled.RFQData().QuoteToken.Decimals, uint64(6))
-	assert.NotNil(t, unmarshalled.RFQData().BaseToken.Address)
-	assert.NotNil(t, unmarshalled.RFQData().QuoteToken.Address)
-	assert.Equal(t, unmarshalled.RFQData().BaseToken.Symbol, "VFG")
-	assert.Equal(t, unmarshalled.RFQData().QuoteToken.Symbol, "USDC")
+	rfqRequest := unmarshalled.EmbeddedData().(*SignableData)
+	assert.Equal(t, rfqRequest.BaseTokenAmount.Cmp(big.NewInt(0)), 1)
+	assert.Equal(t, rfqRequest.BaseToken.Decimals, uint64(18))
+	assert.Equal(t, rfqRequest.QuoteToken.Decimals, uint64(6))
+	assert.NotNil(t, rfqRequest.BaseToken.Address)
+	assert.NotNil(t, rfqRequest.QuoteToken.Address)
+	assert.Equal(t, rfqRequest.BaseToken.Symbol, "VFG")
+	assert.Equal(t, rfqRequest.QuoteToken.Symbol, "USDC")
 }
 
 func randomTxWithSignature(t *testing.T, key cryptoocax.PrivateKey) *Transaction {

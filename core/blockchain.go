@@ -17,13 +17,17 @@ import (
 	"github.com/go-kit/log"
 )
 
+//go:generate mockery --name=ChainInterface --output=../mocks --case=underscore
 type ChainInterface interface {
 	GetTxByHash(hash common.Hash) (*types.Transaction, error)
 	GetBlockByHash(hash common.Hash) (*types.Block, error)
 	GetBlock(height *big.Int) (*types.Block, error)
 	GetBlockHeader(height *big.Int) (*types.Header, error)
 	GetRFQRequests() ([]*types.RFQRequest, error)
+	GetOpenRFQRequests() ([]*types.OpenRFQ, error)
 	WriteRFQTxs(tx *types.Transaction) error
+	GetOpenRFQByHash(hash common.Hash) (*types.OpenRFQ, error)
+	UpdateActiveRFQ(rfqTxHash common.Hash, quote *types.Quote) error
 
 	// GetLatestBlock() *types.Block
 }
@@ -37,7 +41,9 @@ type Blockchain struct {
 
 	// tracks all open RFQS in memory - these are open RFQS that havent yet received quotes
 	// as quotes are received the openRFQS are updated by appending to the quotes array
-	openRFQS []*types.Transaction
+	openRFQS []*types.OpenRFQ
+
+	openRFQsMap map[common.Hash]*types.OpenRFQ
 	// tracks all closed RFQS which are not yet matched in memory
 	closedRFQS []*types.Transaction
 	// tracks all matched RFQS in memory that are pending settlement
@@ -82,7 +88,9 @@ func NewBlockchain(l log.Logger, genesis *types.Block, db *pebble.Database, vali
 		logger:  l,
 
 		// tracks all open RFQS in memory
-		openRFQS: []*types.Transaction{},
+		openRFQS: []*types.OpenRFQ{},
+
+		openRFQsMap: make(map[common.Hash]*types.OpenRFQ),
 		// tracks all closed RFQS which are not yet matched in memory
 		closedRFQS: []*types.Transaction{},
 		// tracks all matched RFQS in memory that are pending settlement
@@ -226,7 +234,19 @@ func (bc *Blockchain) HasBlock(height *big.Int) bool {
 func (bc *Blockchain) AddOpenRFQTx(kvHash common.Hash, openRFQ *types.Transaction) {
 	bc.lock.Lock()
 	defer bc.lock.Unlock()
-	bc.openRFQS = append(bc.openRFQS, openRFQ)
+	bc.openRFQS = append(bc.openRFQS, openRFQ.EmbeddedData().(*types.OpenRFQ))
+	bc.openRFQsMap[kvHash] = openRFQ.EmbeddedData().(*types.OpenRFQ)
+}
+
+func (bc *Blockchain) GetOpenRFQByHash(hash common.Hash) (*types.OpenRFQ, error) {
+	bc.lock.Lock()
+	defer bc.lock.Unlock()
+
+	openRFQ, ok := bc.openRFQsMap[hash]
+	if !ok {
+		return nil, fmt.Errorf("openRFQ with hash [%x] not found", hash)
+	}
+	return openRFQ, nil
 }
 
 func (bc *Blockchain) Height() *big.Int {
@@ -243,7 +263,7 @@ func (bc *Blockchain) Headers() []*types.Header {
 	return bc.headers
 }
 
-func (bc *Blockchain) GetOpenRFQs() []*types.Transaction {
+func (bc *Blockchain) GetOpenRFQs() []*types.OpenRFQ {
 	return bc.openRFQS
 }
 
@@ -272,7 +292,7 @@ func (bc *Blockchain) WriteRFQTxs(tx *types.Transaction) error {
 
 		rfqRequest := &types.RFQRequest{
 			From: *tx.From(),
-			Data: tx.RFQData(),
+			Data: tx.EmbeddedData().(*types.SignableData),
 			V:    v,
 			R:    r,
 			S:    s,
@@ -287,9 +307,34 @@ func (bc *Blockchain) WriteRFQTxs(tx *types.Transaction) error {
 		// for the original RFQ request we use the hash of the transaction as the key
 		// as all other transaction types refer to this RFQ they will be saved in their
 		// respective tables with the same key
+		fmt.Printf("RFQRequestTxType Stored: %x\n", tx.Hash())
 		err = bc.rfqRequestsTable.Put(tx.Hash().Bytes(), encRFQ.Bytes())
 	case types.OpenRFQTxType:
-		err = bc.openRFQSTable.Put(tx.ReferenceTxHash().Bytes(), tx.Data())
+
+		v, r, s := tx.RawSignatureValues()
+
+		openRFQ := &types.OpenRFQ{
+			From: *tx.From(),
+			Data: tx.EmbeddedData().(*types.RFQData),
+			V:    v,
+			R:    r,
+			S:    s,
+		}
+
+		// encode the OpenRFQ to RLP
+		encRFQ := new(bytes.Buffer)
+		if err := openRFQ.EncodeRLP(encRFQ); err != nil {
+			return err
+		}
+
+		fmt.Printf("OpenRFQTxType Stored: %x\n", tx.ReferenceTxHash())
+		// Store the RLP-encoded OpenRFQ
+		// store in memory and set timers
+		bc.openRFQS = append(bc.openRFQS, openRFQ)
+		bc.openRFQsMap[tx.ReferenceTxHash()] = openRFQ
+
+		err = bc.openRFQSTable.Put(tx.ReferenceTxHash().Bytes(), encRFQ.Bytes())
+
 	case types.ClosedRFQTxType:
 		err = bc.closedRFQSTable.Put(tx.ReferenceTxHash().Bytes(), tx.Data())
 	case types.MatchedRFQTxType:
@@ -333,6 +378,55 @@ func (bc *Blockchain) GetRFQRequests() ([]*types.RFQRequest, error) {
 
 	return rfqRequests, nil
 }
+
+func (bc *Blockchain) GetOpenRFQRequests() ([]*types.OpenRFQ, error) {
+	var openRFQs []*types.OpenRFQ
+
+	it := bc.openRFQSTable.NewIterator(nil, nil)
+	defer it.Release()
+
+	for it.Next() {
+		// Decode the RLP-encoded transaction data from the iterator
+		txData := it.Value()
+
+		var openRFQ types.OpenRFQ
+		// decode txData into an OpenRFQ struct
+
+		if err := rlp.DecodeBytes(txData, &openRFQ); err != nil {
+			return nil, fmt.Errorf("error decoding OpenRFQ: %w", err)
+		}
+
+		openRFQs = append(openRFQs, &openRFQ)
+	}
+
+	// Return any potential iteration error
+	if err := it.Error(); err != nil {
+		return nil, fmt.Errorf("error iterating over transactions: %w", err)
+	}
+
+	return openRFQs, nil
+}
+
+func (bc *Blockchain) UpdateActiveRFQ(rfqTxHash common.Hash, quote *types.Quote) error {
+	// Get the RFQ from the DB
+	bc.lock.Lock()
+	defer bc.lock.Unlock()
+	openRFQ, ok := bc.openRFQsMap[rfqTxHash]
+	if !ok {
+		return fmt.Errorf("RFQ does not exist or has already expired")
+	}
+	openRFQ.Data.Quotes = append(openRFQ.Data.Quotes, quote)
+
+	return nil
+}
+
+// func (bc *Blockchain) GetRFQ(rfqTxHash common.Hash) (*types.RFQRequest, error) {
+// 	// Get the RFQ from the DB
+// }
+
+// func (bc *Blockchain) UpdateRFQ(rfq *types.RFQRequest) error {
+// 	// Update the RFQ in the DB
+// }
 
 func (bc *Blockchain) addBlockWithoutValidation(b *types.Block) error {
 	bc.lock.Lock()

@@ -141,6 +141,14 @@ func PrivateKeyFromBytes(privKeyBytes []byte) (*PrivateKey, error) {
 	return &PrivateKey{key: privKeyECDSA}, nil
 }
 
+func BytesToPublicKey(pubKeyBytes []byte) (PublicKey, error) {
+	pubKey, err := crypto.UnmarshalPubkey(pubKeyBytes)
+	if err != nil {
+		return nil, err
+	}
+	return elliptic.Marshal(pubKey.Curve, pubKey.X, pubKey.Y), nil
+}
+
 func (sig *Signature) Verify(pubkey PublicKey, data []byte) bool {
 	validate := validate(pubkey, sig.ToBytes(), data)
 

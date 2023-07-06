@@ -123,6 +123,7 @@ func NewServer(options ServerOptions) (*Server, error) {
 		apiServerCfg := api.ServerConfig{
 			Logger:     options.Logger,
 			ListenAddr: options.APIListenAddr,
+			PrivateKey: options.PrivateKey,
 		}
 
 		apiServer = api.NewServer(apiServerCfg, chain, txChan)
@@ -244,7 +245,7 @@ free:
 			if err := s.processTransaction(tx); err != nil {
 				s.Logger.Log("TX err", err)
 			}
-
+			fmt.Printf("XXXX Processed tx [%+v]\n", tx)
 			s.Logger.Log("msg", "new transaction received", "tx", tx)
 		case rpc := <-s.rpcCh:
 			msg, err := s.RPCDecodeFunc(rpc)
@@ -315,7 +316,7 @@ func (s *Server) handleRFQRequest(event types.TxEvent) {
 	openRFQData := createOpenRFQData(tx, event.TxHash)
 	currentTime := time.Now().Unix()
 	openRFQData.RFQStartTime = currentTime
-	openRFQData.RFQEndTime = currentTime + int64(tx.RFQData().RFQDurationMs)
+	openRFQData.RFQEndTime = currentTime + int64(tx.EmbeddedData().(*types.SignableData).RFQDurationMs)
 	newOpenRfq := types.NewOpenRFQ(s.ServerOptions.PrivateKey.PublicKey().Address(), openRFQData)
 	txOpenRfq := types.NewTx(newOpenRfq)
 	signedTx, err := txOpenRfq.Sign(*s.ServerOptions.PrivateKey)
@@ -323,7 +324,6 @@ func (s *Server) handleRFQRequest(event types.TxEvent) {
 		s.Logger.Log("msg", "Failed to sign OpenRFQ", "err", err)
 		return
 	}
-
 	// broadcast the new OpenRFQ over WebSockets
 	for _, callback := range s.Callbacks {
 		callback(newOpenRfq)
@@ -335,10 +335,11 @@ func (s *Server) handleRFQRequest(event types.TxEvent) {
 	// TODO: do we need to sync these tables that will only be available to validator nodes? Or do we just submit
 	// final transactions to the blockchain and let the other nodes sync from there?
 
+	fmt.Printf("handler adding new OpenRFQ to chain [%+v]\n", signedTx)
 	s.chain.WriteRFQTxs(signedTx)
 
 	// we add this to the servers list of open RFQs
-	s.chain.AddOpenRFQTx(signedTx.ReferenceTxHash(), signedTx)
+	// s.chain.AddOpenRFQTx(signedTx.ReferenceTxHash(), signedTx)
 
 	// we submit it to the blockchain to provide a decentralized record of the RFQ Opening for bids
 	s.txChan <- signedTx
@@ -346,10 +347,9 @@ func (s *Server) handleRFQRequest(event types.TxEvent) {
 }
 
 func createOpenRFQData(rfq *types.Transaction, txHash common.Hash) *types.RFQData {
-	fmt.Printf("Creating OpenRFQData %+v\n", rfq)
 	return &types.RFQData{
 		RFQTxHash:          txHash,
-		RFQRequest:         rfq.RFQData(),
+		RFQRequest:         rfq.EmbeddedData().(*types.SignableData),
 		RFQStartTime:       0,
 		RFQEndTime:         0,
 		SettlementContract: common.HexToAddress("0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"),

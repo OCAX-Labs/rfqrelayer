@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/ioutil"
 	"math/big"
 	"sync"
 
@@ -15,6 +16,7 @@ import (
 	"github.com/OCAX-labs/rfqrelayer/common"
 	"github.com/OCAX-labs/rfqrelayer/core"
 	"github.com/OCAX-labs/rfqrelayer/core/types"
+	cryptoocax "github.com/OCAX-labs/rfqrelayer/crypto/ocax"
 	"github.com/go-kit/log"
 	"github.com/gorilla/websocket"
 	"github.com/labstack/echo/v4"
@@ -71,6 +73,19 @@ type RFQRequest struct {
 	S    *big.Int
 }
 
+type RFQRequestBody struct {
+	From string              `json:"from"`
+	Data *types.SignableData `json:"data"`
+}
+
+type QuoteBody struct {
+	From string           `json:"from"`
+	Data *types.QuoteData `json:"data"`
+	V    *big.Int         `json:"v"`
+	R    *big.Int         `json:"r"`
+	S    *big.Int         `json:"s"`
+}
+
 type Header struct {
 	Version        uint64      `json:"version" gencodec:"required"`
 	TxHash         common.Hash `json:"txRoot" gencodec:"required"`
@@ -84,6 +99,7 @@ type Header struct {
 type ServerConfig struct {
 	Logger     log.Logger
 	ListenAddr string
+	PrivateKey *cryptoocax.PrivateKey
 }
 
 type Server struct {
@@ -115,7 +131,10 @@ func (s *Server) Start() error {
 	e.GET("/tx/:hash", s.handleGetTx)
 	e.POST("/tx", s.handlePostTx)
 	e.GET("/rfqs", s.handleGetRFQRequests)
-	// e.GET("/openrfqs", s.handleGetOpenRFQRequests)
+	e.POST("/rfqs", s.handlePostRFQRequest)
+	e.GET("/openRFQs", s.handleGetOpenRFQRequests)
+	e.GET("/openRFQs/:txHash", s.handleGetOpenRFQRequest)
+	e.POST("/quotes/:rfqTxHash", s.handlePostQuote)
 
 	// websockets for broadcast of RFQRequest
 	e.GET("/ws", s.handleWsConnections)
@@ -132,21 +151,9 @@ func (s *Server) handlePostTx(c echo.Context) error {
 	if err := txRequest.Validate(); err != nil {
 		return c.JSON(http.StatusBadRequest, APIError{Error: err.Error()})
 	}
-	fmt.Printf("tx.Data: %+v\n", txRequest.Data())
-	fmt.Printf("tx.From: %+v\n", txRequest.From().Hex())
-
 	// so we are not constrained by block time - we save this in a custom table
 	// to allow fast access to the db
 	s.bc.WriteRFQTxs(txRequest)
-
-	// Now that the RFQ is validated we can create an "auction wrapper" used to receive that auctions quotes from the blockchain
-	// this wrapper is an OpenRFQ struct that is stored in the db with a copy kept in memory the OpenRFQ can only be updated by quotes submitted
-	// before the RFQ deadline - once the deadline is reached the openRFQ is closed and the records are sent to the matching engine - for determining
-	// the best auction quotes
-
-	// openRFQ := types.NewOpenRFQ(txRequest)
-
-	// s.c
 
 	// Broadcast to the blockchain
 	s.txChan <- txRequest
@@ -220,6 +227,117 @@ func (s *Server) handleGetRFQRequests(c echo.Context) error {
 	return c.JSON(http.StatusOK, intoJSONRFQ(rfqRequests))
 }
 
+func (s *Server) handleGetOpenRFQRequests(c echo.Context) error {
+	rfqRequests, err := s.bc.GetOpenRFQRequests()
+	if err != nil {
+		return c.JSON(http.StatusBadRequest, APIError{Error: err.Error()})
+	}
+	return c.JSON(http.StatusOK, intoJSONOpenRFQS(rfqRequests))
+}
+
+func (s *Server) handleGetOpenRFQRequest(c echo.Context) error {
+	hash := c.Param("txHash")
+	b, err := hex.DecodeString(hash)
+	if err != nil {
+		return c.JSON(http.StatusBadRequest, APIError{Error: err.Error()})
+	}
+	hashFromBytes := common.HashFromBytes(b)
+
+	rfqRequest, err := s.bc.GetOpenRFQByHash(hashFromBytes)
+	if err != nil {
+		return c.JSON(http.StatusBadRequest, APIError{Error: err.Error()})
+	}
+
+	return c.JSON(http.StatusOK, intoJSONOpenRFQ(rfqRequest))
+}
+
+func (s *Server) handlePostRFQRequest(c echo.Context) error {
+	requestBody := new(RFQRequestBody)
+
+	// Start by reading the request body into a byte slice
+	body, err := ioutil.ReadAll(c.Request().Body)
+	if err != nil {
+		return c.JSON(http.StatusBadRequest, APIError{Error: err.Error()})
+	}
+
+	// Then use json.Unmarshal to unmarshal the byte slice into signableData
+	err = json.Unmarshal(body, requestBody)
+	if err != nil {
+		return c.JSON(http.StatusBadRequest, APIError{Error: err.Error()})
+	}
+
+	signableData := requestBody.Data
+	if err := signableData.Validate(); err != nil {
+		return c.JSON(http.StatusBadRequest, APIError{Error: err.Error()})
+	}
+
+	rfqRequest := types.NewRFQRequest(s.PrivateKey.PublicKey().Address(), signableData)
+	txRFQRequest := types.NewTx(rfqRequest)
+	signedTx, err := txRFQRequest.Sign(*s.PrivateKey)
+	if err != nil {
+		return c.JSON(http.StatusBadRequest, APIError{Error: err.Error()})
+	}
+	s.bc.WriteRFQTxs(signedTx)
+
+	// Broadcast to the blockchain
+	s.txChan <- signedTx
+
+	return c.JSON(http.StatusAccepted, signedTx)
+
+}
+
+func (s *Server) handlePostQuote(c echo.Context) error {
+	rfqTxHash := c.Param("rfqTxHash")
+	b, err := hex.DecodeString(rfqTxHash)
+	if err != nil {
+		return c.JSON(http.StatusBadRequest, APIError{Error: err.Error()})
+	}
+	quoteDataBody := new(QuoteBody)
+
+	rfqHash := common.HashFromBytes(b)
+	openRFQ, err := s.bc.GetOpenRFQByHash(rfqHash)
+	if err != nil {
+		return c.JSON(http.StatusBadRequest, APIError{Error: "RFQ does not exist or has already expired"})
+	}
+
+	if time.Now().Unix() > openRFQ.Data.RFQEndTime {
+		return c.JSON(http.StatusBadRequest, APIError{Error: "RFQ is no longer open"})
+	}
+
+	body, err := ioutil.ReadAll(c.Request().Body)
+	if err != nil {
+		return c.JSON(http.StatusBadRequest, APIError{Error: err.Error()})
+	}
+
+	err = json.Unmarshal(body, quoteDataBody)
+	if err != nil {
+		return c.JSON(http.StatusBadRequest, APIError{Error: err.Error()})
+	}
+
+	quoteData := quoteDataBody.Data
+	if err := quoteData.Validate(); err != nil {
+		return c.JSON(http.StatusBadRequest, APIError{Error: err.Error()})
+	}
+
+	quote := types.NewQuote(common.HexToAddress(quoteDataBody.From), quoteData)
+
+	quote.V = quoteDataBody.V
+	quote.R = quoteDataBody.R
+	quote.S = quoteDataBody.S
+
+	// Add the quote to the RFQ
+	// update the openRFQ in memory
+	s.bc.UpdateActiveRFQ(rfqHash, quote)
+
+	return c.JSON(http.StatusCreated, openRFQ)
+}
+
+// Check that the RFQ is still open and not completed
+// If it is not completed add the quote to the in memory rfq
+
+// If the openRFQ is completed ie, RFQEndTime has passed, then return an error
+// If the openRFQ is not completed, then add the quote to the db
+
 func intoJSONRFQ(rfqRequests []*types.RFQRequest) []RFQRequest {
 	rfqRequestsJSON := make([]RFQRequest, len(rfqRequests))
 	for i, rfqRequest := range rfqRequests {
@@ -240,6 +358,28 @@ func intoJSONRFQRequest(rfqRequest *types.RFQRequest) RFQRequest {
 		V:    rfqRequest.V,
 		R:    rfqRequest.R,
 		S:    rfqRequest.S,
+	}
+}
+
+func intoJSONOpenRFQS(openRFQs []*types.OpenRFQ) []types.OpenRFQ {
+	openRFQsJSON := make([]types.OpenRFQ, len(openRFQs))
+	for i, openRFQ := range openRFQs {
+		openRFQsJSON[i] = intoJSONOpenRFQ(openRFQ)
+	}
+	return openRFQsJSON
+}
+
+func intoJSONOpenRFQ(openRFQ *types.OpenRFQ) types.OpenRFQ {
+	// dataJson, err := openRFQ.Data.JSON()
+	// if err != nil {
+	// 	panic(err)
+	// }
+	return types.OpenRFQ{
+		From: openRFQ.From,
+		Data: openRFQ.Data,
+		V:    openRFQ.V,
+		R:    openRFQ.R,
+		S:    openRFQ.S,
 	}
 }
 
