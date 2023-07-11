@@ -48,7 +48,7 @@ func main() {
 			Symbol:   "USDC",
 			Decimals: 6,
 		},
-		RFQDurationMs: 720000,
+		RFQDurationMs: 90000,
 	}
 
 	rfqRequest := types.NewRFQRequest(addr, &signableData)

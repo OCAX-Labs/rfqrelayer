@@ -76,7 +76,7 @@ type Server struct {
 	ctx        context.Context
 	cancelFunc context.CancelFunc
 
-	Callbacks []func(*types.OpenRFQ)
+	Callbacks []func(*types.Transaction, byte)
 }
 
 func NewServer(options ServerOptions) (*Server, error) {
@@ -154,7 +154,7 @@ func NewServer(options ServerOptions) (*Server, error) {
 		// for broadcasting status messages
 		ctx:        ctx,
 		cancelFunc: cancelFunc,
-		Callbacks:  make([]func(*types.OpenRFQ), 0),
+		Callbacks:  make([]func(*types.Transaction, byte), 0),
 	}
 
 	s.TCPTransport.peerCh = peerCh
@@ -163,7 +163,7 @@ func NewServer(options ServerOptions) (*Server, error) {
 		s.RPCProcessor = s
 	}
 	if s.isValidator {
-		s.RegisterCallback(apiServer.BroadcastOpenRFQ)
+		s.RegisterCallback(apiServer.BroadcastTx)
 
 		go func() {
 			s.validatorLoop()
@@ -176,7 +176,7 @@ func NewServer(options ServerOptions) (*Server, error) {
 	return s, nil
 }
 
-func (s *Server) RegisterCallback(cb func(*types.OpenRFQ)) {
+func (s *Server) RegisterCallback(cb func(*types.Transaction, byte)) {
 	s.Callbacks = append(s.Callbacks, cb)
 }
 
@@ -280,7 +280,6 @@ func (s *Server) listenToTxEvents() {
 		for {
 			select {
 			case event := <-s.chain.EventChan:
-				fmt.Printf("XXXX Received event [%+v]\n", event)
 				s.handleTxEvent(event)
 			}
 		}
@@ -288,12 +287,14 @@ func (s *Server) listenToTxEvents() {
 }
 
 func (s *Server) handleTxEvent(event types.TxEvent) {
+	fmt.Printf("XXXXXXXXXXXXXXXXXXXX Received event [%+v]\n", event)
 	switch event.TxType {
 	case types.RFQRequestTxType:
 		s.handleRFQRequest(event)
+	case types.OpenRFQTxType:
+		s.handleCloseRFQ(event)
 	case types.QuoteTxType:
-		// ns.handleQuote(event)
-		// Other transaction types...
+		s.handleQuoteEvent(event)
 	default:
 		// Unknown or unsupported transaction type
 		s.Logger.Log("msg", "Received unknown transaction type", "type", event.TxType)
@@ -328,7 +329,7 @@ func (s *Server) handleRFQRequest(event types.TxEvent) {
 	}
 	// broadcast the new OpenRFQ over WebSockets
 	for _, callback := range s.Callbacks {
-		callback(newOpenRfq)
+		callback(signedTx, types.OpenRFQTxType)
 	}
 
 	// We dont want rfqs to be constrained by block times so we also store the OpenRFQ to its own DB table
@@ -340,12 +341,22 @@ func (s *Server) handleRFQRequest(event types.TxEvent) {
 	fmt.Printf("handler adding new OpenRFQ to chain [%+v]\n", signedTx)
 	s.chain.WriteRFQTxs(signedTx)
 
-	// we add this to the servers list of open RFQs
-	// s.chain.AddOpenRFQTx(signedTx.ReferenceTxHash(), signedTx)
-
 	// we submit it to the blockchain to provide a decentralized record of the RFQ Opening for bids
 	s.txChan <- signedTx
 
+}
+
+func (s *Server) handleQuoteEvent(event types.TxEvent) {
+	for _, callback := range s.Callbacks {
+		callback(event.Transaction.(*types.Transaction), types.QuoteTxType)
+	}
+
+}
+
+func (s *Server) handleCloseRFQ(event types.TxEvent) {
+	for _, callback := range s.Callbacks {
+		callback(event.Transaction.(*types.Transaction), types.OpenRFQTxType)
+	}
 }
 
 func createOpenRFQData(rfq *types.Transaction, txHash common.Hash) *types.RFQData {

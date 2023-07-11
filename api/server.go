@@ -488,15 +488,32 @@ func (s *Server) handleWsConnections(c echo.Context) error {
 	return nil
 }
 
-func (s *Server) BroadcastOpenRFQ(openRFQ *types.OpenRFQ) {
-	fmt.Println("WEBSOCKETS: broadcasting open RFQ")
-	data, err := json.Marshal(openRFQ) // Replace with your RFQRequest marshalling code
-
+func (s *Server) BroadcastTx(tx *types.Transaction, txType byte) {
+	fmt.Println("WEBSOCKETS: broadcasting  tx")
+	var data []byte
+	var err error
+	switch txType {
+	case types.OpenRFQTxType:
+		data, err = json.Marshal(tx.EmbeddedData().(*types.RFQData)) // Replace with your RFQRequest marshalling code
+		if err != nil {
+			s.Logger.Log("level", "error", "broadcast error", err)
+			return
+		}
+	case types.QuoteTxType:
+		data, err = json.Marshal(tx.EmbeddedData().(*types.QuoteData))
+	case types.ClosedRFQTxType:
+		data, err = json.Marshal(tx.EmbeddedData().(types.OpenRFQ))
+	default:
+		s.Logger.Log("level", "error", "broadcast error", "invalid tx type")
+	}
 	if err != nil {
-		s.Logger.Log("level", "error", "broadcasterror", err)
+		s.Logger.Log("level", "error", "broadcast error", err)
 		return
 	}
+	s.broadcastToWS(data)
+}
 
+func (s *Server) broadcastToWS(data []byte) {
 	for client := range clients {
 		if err := client.WriteMessage(websocket.TextMessage, data); err != nil {
 			s.Logger.Log("level", "error", "error", err)

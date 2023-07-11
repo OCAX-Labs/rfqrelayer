@@ -1,0 +1,224 @@
+{
+	"info": {
+		"_postman_id": "41962fdc-4394-42aa-bdbf-12a6aaaa3f84",
+		"name": "rfqrelayer",
+		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+		"_exporter_id": "264456"
+	},
+	"item": [
+		{
+			"name": "Get RFQs",
+			"protocolProfileBehavior": {
+				"followRedirects": false,
+				"followOriginalHttpMethod": false,
+				"followAuthorizationHeader": false
+			},
+			"request": {
+				"method": "GET",
+				"header": [
+					{
+						"key": "Content-Type",
+						"value": "application/json"
+					}
+				],
+				"url": {
+					"raw": "http://localhost:9999/rfqs",
+					"protocol": "http",
+					"host": [
+						"localhost"
+					],
+					"port": "9999",
+					"path": [
+						"rfqs"
+					]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "Get Quotes",
+			"protocolProfileBehavior": {
+				"followRedirects": false,
+				"followOriginalHttpMethod": false,
+				"followAuthorizationHeader": false
+			},
+			"request": {
+				"method": "GET",
+				"header": [
+					{
+						"key": "Content-Type",
+						"value": "application/json"
+					}
+				],
+				"url": {
+					"raw": "http://localhost:9999/quotes/e0a51f310e7eba19e81dd8e59ff0e6d3bd8afb9de160132f46da37a774504f9a",
+					"protocol": "http",
+					"host": [
+						"localhost"
+					],
+					"port": "9999",
+					"path": [
+						"quotes",
+						"e0a51f310e7eba19e81dd8e59ff0e6d3bd8afb9de160132f46da37a774504f9a"
+					]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "Get OpenRFQs",
+			"protocolProfileBehavior": {
+				"followRedirects": false,
+				"followOriginalHttpMethod": false,
+				"followAuthorizationHeader": false
+			},
+			"request": {
+				"method": "GET",
+				"header": [
+					{
+						"key": "Content-Type",
+						"value": "application/json"
+					}
+				],
+				"url": {
+					"raw": "http://localhost:9999/openRFQs",
+					"protocol": "http",
+					"host": [
+						"localhost"
+					],
+					"port": "9999",
+					"path": [
+						"openRFQs"
+					]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "Get ClosedRFQs",
+			"protocolProfileBehavior": {
+				"followRedirects": false,
+				"followOriginalHttpMethod": false,
+				"followAuthorizationHeader": false
+			},
+			"request": {
+				"method": "GET",
+				"header": [
+					{
+						"key": "Content-Type",
+						"value": "application/json"
+					}
+				],
+				"url": {
+					"raw": "http://localhost:9999/closedRFQs",
+					"protocol": "http",
+					"host": [
+						"localhost"
+					],
+					"port": "9999",
+					"path": [
+						"closedRFQs"
+					]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "Get OpenRFQs/:rfqTxHash",
+			"protocolProfileBehavior": {
+				"followRedirects": false,
+				"followOriginalHttpMethod": false,
+				"followAuthorizationHeader": false
+			},
+			"request": {
+				"method": "GET",
+				"header": [
+					{
+						"key": "Content-Type",
+						"value": "application/json"
+					}
+				],
+				"url": {
+					"raw": "http://localhost:9999/openRFQs/3546ec9205c0a78d56bcffb3b29b7ec385eb2eac0a141d1a44dbab8f9ebb4d8c",
+					"protocol": "http",
+					"host": [
+						"localhost"
+					],
+					"port": "9999",
+					"path": [
+						"openRFQs",
+						"3546ec9205c0a78d56bcffb3b29b7ec385eb2eac0a141d1a44dbab8f9ebb4d8c"
+					]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "Post RFQ",
+			"protocolProfileBehavior": {
+				"followRedirects": false,
+				"followOriginalHttpMethod": false,
+				"followAuthorizationHeader": false
+			},
+			"request": {
+				"method": "POST",
+				"header": [
+					{
+						"key": "Content-Type",
+						"value": "application/json"
+					}
+				],
+				"body": {
+					"mode": "raw",
+					"raw": "{\n    \"from\": \"0x845AC49950D2F481BFF9964Ae03912e03Ff8AF95\",\n    \"data\": {\n        \"requestorId\": \"3ad56dbed3\",\n        \"baseTokenAmount\": 622000000000000000000,\n        \"baseToken\": {\n            \"Address\": \"0x9f8F72aA9304c8B593d555F12eF6589cC3A579A2\",\n            \"Symbol\": \"MKR\",\n            \"Decimals\": 18\n        },\n        \"quoteToken\": {\n            \"Address\": \"0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48\",\n            \"Symbol\": \"USDC\",\n            \"Decimals\": 6\n        },\n        \"rfqDurationMs\": 90000\n    },\n    \"v\": \"0x0\",\n    \"r\": \"0x6d71f411468fdc52f0d4af5e8af613992f1fea1bd5700b08c76da974d835385\",\n    \"s\": \"0x28956f3996245ea9d239700e7882b9716ea7a4015fed6d63aec17316d3fec6cc\"\n}"
+				},
+				"url": {
+					"raw": "http://localhost:9999/rfqs",
+					"protocol": "http",
+					"host": [
+						"localhost"
+					],
+					"port": "9999",
+					"path": [
+						"rfqs"
+					]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "Post Quote For An RFQ",
+			"protocolProfileBehavior": {
+				"followRedirects": false,
+				"followOriginalHttpMethod": false,
+				"followAuthorizationHeader": false
+			},
+			"request": {
+				"method": "POST",
+				"header": [
+					{
+						"key": "Content-Type",
+						"value": "application/json"
+					}
+				],
+				"body": {
+					"mode": "raw",
+					"raw": "{\n\t\t\"from\": \"0xc1F7093BbC178778cC6c4aB9B356f99970A24A99\",\n\t\t\"data\": {\n\t\t\t\"quoterId\": \"0xc1F7093BbC178778cC6c4aB9B356f99970A24A99\",\n\t\t\t\"rfqTxHash\": \"0x6dfbb47d07fd01aba64748f74c952caf3bef1431309365123cf8588fe7721895\",\n\t\t\t\"quoteExpiryTime\": 600000,\n\t\t\t\"baseToken\": {\n\t\t\t\t\"address\": \"0x9f8F72aA9304c8B593d555F12eF6589cC3A579A2\",\n\t\t\t\t\"symbol\": \"MKR\",\n\t\t\t\t\"decimals\": 18\n\t\t\t},\n\t\t\t\"quoteToken\": {\n\t\t\t\t\"address\": \"0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48\",\n\t\t\t\t\"symbol\": \"USDC\",\n\t\t\t\t\"decimals\": 6\n\t\t\t},\n\t\t\t\"baseTokenAmount\": 622000000000000000000,\n\t\t\t\"bidPrice\": 1375032634072655724544,\n\t\t\t\"askPrice\": 1447402772708058726400,\n\t\t\t\"encryptionPublicKeys\": []\n\t\t},\n\t\t\"signature\": \"11999759fa93c4fcfc0b2918918066bec4c5ea25da0d8b8478d97ee6e2ea803d20523a297492f2c8b2071b72077af254c317ce6e97520bfcf33b725a997d776000\"\n\t}"
+				},
+				"url": {
+					"raw": "http://localhost:9999/quotes",
+					"protocol": "http",
+					"host": [
+						"localhost"
+					],
+					"port": "9999",
+					"path": [
+						"quotes"
+					]
+				},
+				"description": "endpoint: /quotes/:rfqTxHash\n\nwhere rfqTxHash is the hash of an active RTQ\n\n"
+			},
+			"response": []
+		}
+	]
+}
