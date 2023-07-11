@@ -24,9 +24,9 @@ func main() {
 	rfqTxRef := flag.String("rfqTxRef", "", "the RFQ tx reference being quoted")
 	privateKey := cryptoocax.GeneratePrivateKey()
 	publicKey := privateKey.PublicKey()
-	addr := publicKey.Address()
-	checkSumAddr := addr.Hex()
-	addr = common.HexToAddress(checkSumAddr)
+	from := publicKey.Address()
+	// checkSumAddr := addr.Hex()
+	// addr = common.HexToAddress(checkSumAddr)
 	flag.Parse()
 	if *rfqTxRef == "" {
 		log.Fatal("Please provide a valid RFQ tx reference")
@@ -58,7 +58,7 @@ func main() {
 	bidPrice, askPrice := generateRandomPrice(1500)
 
 	quoteData := types.QuoteData{
-		QuoterId:        result["from"].(string),
+		QuoterId:        from.Hex(),
 		RFQTxHash:       common.HexToHash(*rfqTxRef),
 		QuoteExpiryTime: uint64(10 * 60 * 1000),
 		BaseToken: &types.BaseToken{
@@ -77,13 +77,19 @@ func main() {
 		EncryptionPublicKeys: []*cryptoocax.PublicKey{},
 	}
 
-	quote := types.NewQuote(common.HexToAddress(checkSumAddr), &quoteData)
+	quote := types.NewQuote(from, &quoteData)
 	tx := types.NewTx(quote)
 	signedTx, err := tx.Sign(privateKey)
 	if err != nil {
 		log.Fatalf("Failed to sign data: %v", err)
 	}
 	v, r, s := signedTx.RawSignatureValues()
+	err = signedTx.Verify()
+	if err != nil {
+		log.Fatalf("Failed to verify signature: %v", err)
+	}
+	signature := cryptoocax.Signature{V: v, R: r, S: s}
+
 	fmt.Printf(`{
 		"from": "%s",
 		"data": {
@@ -105,12 +111,10 @@ func main() {
 			"askPrice": %d,
 			"encryptionPublicKeys": []
 		},
-		"v": %d,
-		"r": %d,
-		"s": %d
+		"signature": "%s"
 	}\n`,
-		addr.Hex(),
-		addr.Hex(),
+		from.Hex(),
+		from.Hex(),
 		quoteData.RFQTxHash.Hex(),
 		quoteData.QuoteExpiryTime,
 		quoteData.BaseToken.Address.Hex(),
@@ -122,9 +126,7 @@ func main() {
 		quoteData.BaseTokenAmount,
 		quoteData.BidPrice,
 		quoteData.AskPrice,
-		v,
-		r,
-		s,
+		signature.String(),
 	)
 }
 

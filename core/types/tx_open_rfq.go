@@ -14,6 +14,15 @@ import (
 	"github.com/ethereum/go-ethereum/rlp"
 )
 
+type RFQStatus string
+
+const (
+	RFQStatusOpen    RFQStatus = "OPEN"
+	RFQStatusClosed  RFQStatus = "CLOSED"
+	RFQStatusMatched RFQStatus = "MATCHED"
+	RFQStatusSettled RFQStatus = "SETTLED"
+)
+
 type RFQData struct {
 	RFQTxHash          common.Hash    `json:"rfqTxHash"`
 	RFQRequest         *SignableData  `json:"rfqRequest"`
@@ -22,6 +31,7 @@ type RFQData struct {
 	Quotes             []*Quote       `json:"quotes"`
 	SettlementContract common.Address `json:"settlementContract"`
 	MatchingContract   common.Address `json:"matchingContract"`
+	Status             RFQStatus      `json:"status"`
 }
 
 func (d RFQData) String() string {
@@ -32,13 +42,27 @@ func (d RFQData) String() string {
     RFQStartTime: %d, 
     RFQEndTime: %d, 
     SettlementContract: %s, 
-    MatchingContract: %s}`,
+    MatchingContract: %s
+	Status: %s}`,
 		d.RFQTxHash.Hex(),
 		d.RFQRequest.String(),
 		d.RFQStartTime,
 		d.RFQEndTime,
 		d.SettlementContract.Hex(),
-		d.MatchingContract.Hex())
+		d.MatchingContract.Hex(),
+		d.Status,
+	)
+}
+
+func (d *RFQData) Close() {
+	d.Status = RFQStatusClosed
+}
+func (d *RFQData) Matched() {
+	d.Status = RFQStatusMatched
+}
+
+func (d *RFQData) Settled() {
+	d.Status = RFQStatusSettled
 }
 
 type OpenRFQ struct {
@@ -51,12 +75,7 @@ type OpenRFQ struct {
 	S *big.Int `json:"s" gencodec:"required"`
 }
 
-func newRFQ() *RFQData {
-	return &RFQData{}
-}
-
 func NewOpenRFQ(from common.Address, data *RFQData) *OpenRFQ {
-
 	return &OpenRFQ{
 		Data: data,
 		From: from,
@@ -155,15 +174,11 @@ func (tx *OpenRFQ) from() *common.Address { return &tx.From }
 func (tx *OpenRFQ) txType() byte          { return OpenRFQTxType }
 
 func (tx *OpenRFQ) data() []byte {
-	dataBytes, err := json.Marshal(tx.Data)
+	txDataBytes, err := tx.Data.ToBytes()
 	if err != nil {
 		panic(fmt.Sprintf("failed to marshal tx data: %v", err))
 	}
-	return dataBytes
-}
-
-func (tx *OpenRFQ) rfqData() *SignableData {
-	return tx.Data.RFQRequest
+	return txDataBytes
 }
 
 func (tx *OpenRFQ) openRFQData() *RFQData {
@@ -172,6 +187,14 @@ func (tx *OpenRFQ) openRFQData() *RFQData {
 
 func (tx *OpenRFQ) embeddedData() interface{} {
 	return tx.openRFQData()
+}
+
+func (r *RFQData) ToBytes() ([]byte, error) {
+	buffer := &bytes.Buffer{}
+	if err := rlp.Encode(buffer, r); err != nil {
+		return nil, err
+	}
+	return buffer.Bytes(), nil
 }
 
 // the hash of the underlying RFQRquest transaction that led to this OpenRFQ
@@ -248,7 +271,7 @@ func (r *OpenRFQ) DecodeRLP(s *rlp.Stream) error {
 }
 
 func (rfqData *RFQData) FromInterfaces(data []interface{}) error {
-	if len(data) != 7 {
+	if len(data) != 8 {
 		return fmt.Errorf("wrong number of elements: expected 7, got %d", len(data))
 	}
 
@@ -347,6 +370,11 @@ func (rfqData *RFQData) FromInterfaces(data []interface{}) error {
 	}
 	matchingContractAddress := common.BytesToAddress(matchingContractAddressBytes)
 
+	statusBytes, ok := data[7].([]byte) // the 8th element will be the status
+	if !ok {
+		return fmt.Errorf("invalid status type %T", data[7])
+	}
+	status := string(statusBytes) // convert bytes to string
 	rfqData.RFQTxHash = rfqTxHash
 	rfqData.RFQRequest = rfqRequest
 	rfqData.RFQStartTime = int64(rfqStartTime)
@@ -354,6 +382,7 @@ func (rfqData *RFQData) FromInterfaces(data []interface{}) error {
 	rfqData.Quotes = quotes
 	rfqData.SettlementContract = settlementContractAddress
 	rfqData.MatchingContract = matchingContractAddress
+	rfqData.Status = RFQStatus(status)
 
 	return nil
 }
@@ -377,7 +406,7 @@ func (tx *OpenRFQ) String() string {
 }
 
 func (src *RFQData) Validate() error {
-
+	// add validation logic here
 	return nil
 }
 
@@ -395,6 +424,7 @@ func (src *RFQData) EncodeRLP(w io.Writer) error {
 		Quotes             []*Quote
 		SettlementContract common.Address
 		MatchingContract   common.Address
+		Status             RFQStatus
 	}{
 		RFQTxHash:          src.RFQTxHash,
 		RFQRequest:         src.RFQRequest,
@@ -403,6 +433,7 @@ func (src *RFQData) EncodeRLP(w io.Writer) error {
 		Quotes:             src.Quotes,
 		SettlementContract: src.SettlementContract,
 		MatchingContract:   src.MatchingContract,
+		Status:             src.Status,
 	}
 	return rlp.Encode(w, &dataToEncode)
 }
@@ -416,6 +447,7 @@ func (src *RFQData) DecodeRLP(s *rlp.Stream) error {
 		Quotes             []*Quote
 		SettlementContract common.Address
 		MatchingContract   common.Address
+		Status             RFQStatus
 	}
 
 	if err := s.Decode(&dataToDecode); err != nil {
@@ -429,7 +461,7 @@ func (src *RFQData) DecodeRLP(s *rlp.Stream) error {
 	src.Quotes = dataToDecode.Quotes
 	src.SettlementContract = dataToDecode.SettlementContract
 	src.MatchingContract = dataToDecode.MatchingContract
-
+	src.Status = dataToDecode.Status
 	return nil
 }
 
@@ -440,7 +472,8 @@ func (src *RFQData) deepCopy() (*RFQData, error) {
 		RFQStartTime:       src.RFQStartTime,
 		RFQEndTime:         src.RFQEndTime,
 		SettlementContract: src.SettlementContract, // Address is a value type
-		MatchingContract:   src.MatchingContract,   // Address is a value type
+		MatchingContract:   src.MatchingContract,
+		Status:             src.Status, // Address is a value type
 	}
 
 	// Deep copy the slices// Deep copy the slices

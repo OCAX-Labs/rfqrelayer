@@ -3,7 +3,6 @@ package api
 import (
 	"bytes"
 	"encoding/json"
-	"fmt"
 	"math/big"
 	"net/http"
 	"net/http/httptest"
@@ -11,6 +10,8 @@ import (
 
 	"github.com/OCAX-labs/rfqrelayer/common"
 	cryptoocax "github.com/OCAX-labs/rfqrelayer/crypto/ocax"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
 
 	"github.com/OCAX-labs/rfqrelayer/core/mocks/chainmocks"
 	"github.com/OCAX-labs/rfqrelayer/core/types"
@@ -22,8 +23,16 @@ func TestHandlePostRFQRequest(t *testing.T) {
 	e := echo.New()
 	// Initialize an instance of your Server type (replace with your actual initialization code)
 	privateKey := cryptoocax.GeneratePrivateKey()
+	addr := privateKey.PublicKey().Address()
 
 	mockChain := &chainmocks.ChainInterface{}
+	mockChain.On("WriteRFQTxs", mock.Anything).Run(func(args mock.Arguments) {
+		signedTx := args.Get(0).(*types.Transaction)
+		assert.Equal(t, uint8(0), signedTx.Type())
+		assert.Equal(t, addr.String(), signedTx.From().String())
+		assert.Equal(t, signedTx.EmbeddedData().(*types.SignableData).RequestorId, "0x0d1d4e623D10F9FBA5Db95830F7d3839406C6AF2")
+		assert.Equal(t, signedTx.EmbeddedData().(*types.SignableData).BaseTokenAmount, big.NewInt(1000000000000000000))
+	}).Return(nil)
 
 	txChan := make(chan *types.Transaction)
 	defer close(txChan)
@@ -64,7 +73,7 @@ func TestHandlePostRFQRequest(t *testing.T) {
 
 	// Prepare the request body
 	body, _ := json.Marshal(RFQRequestBody{
-		From: "0x0d1d4e623D10F9FBA5Db95830F7d3839406C6AF2",
+		From: addr.String(),
 		Data: &signableData,
 	})
 	req := httptest.NewRequest(http.MethodPost, "/rfqs", bytes.NewReader(body))
@@ -90,10 +99,4 @@ func TestHandlePostRFQRequest(t *testing.T) {
 		t.Fatalf("failed to unmarshal response: %s", err.Error())
 	}
 
-	fmt.Println("RESPONSE: ", resp)
-	// Add more assertions based on your response structure
-	// For example:
-	// if resp.SomeField != someExpectedValue {
-	//     t.Fatalf("expected SomeField to be %v but got %v", someExpectedValue, resp.SomeField)
-	// }
 }

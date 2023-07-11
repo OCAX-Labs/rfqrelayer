@@ -5,6 +5,7 @@ import (
 	"crypto/elliptic"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"math/big"
 
 	"github.com/OCAX-labs/rfqrelayer/common"
@@ -42,7 +43,7 @@ func (k PrivateKey) Sign(data []byte) (*Signature, error) {
 	// Adjust the recovery id to be 27 or 28
 	// v += 27
 	vBigInt := new(big.Int).SetInt64(int64(v))
-
+	fmt.Printf("R: %v S: %v V: %v \n", r, s, vBigInt)
 	return &Signature{R: r, S: s, V: vBigInt}, nil
 }
 
@@ -131,6 +132,14 @@ func DeserializeSig(sigBytes []byte) (*Signature, error) {
 	v := new(big.Int).SetInt64(int64(sigBytes[64]))
 
 	return &Signature{R: r, S: s, V: v}, nil
+}
+
+func DeserializeSigFromHexString(sigHex string) (*Signature, error) {
+	sigBytes, err := hex.DecodeString(sigHex)
+	if err != nil {
+		return nil, err
+	}
+	return DeserializeSig(sigBytes)
 }
 
 func PrivateKeyFromBytes(privKeyBytes []byte) (*PrivateKey, error) {

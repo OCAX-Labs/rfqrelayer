@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log"
 	"math/big"
+	"math/rand"
 
 	"github.com/OCAX-labs/rfqrelayer/common"
 	"github.com/OCAX-labs/rfqrelayer/core/types"
@@ -27,7 +28,9 @@ func main() {
 	checkSumAddr := addr.Hex()
 	addr = common.HexToAddress(checkSumAddr)
 
-	amountTokens := big.NewInt(550)
+	// generate a random number between 200 and 1000
+	num := rand.Intn(1000-200) + 200
+	amountTokens := big.NewInt(int64(num))
 	amountTokens = amountTokens.Mul(amountTokens, big.NewInt(1e18)) // add 18 decimals
 
 	uid := utils.GenerateRandomStringID(10)
@@ -45,7 +48,7 @@ func main() {
 			Symbol:   "USDC",
 			Decimals: 6,
 		},
-		RFQDurationMs: 60000,
+		RFQDurationMs: 720000,
 	}
 
 	rfqRequest := types.NewRFQRequest(addr, &signableData)
@@ -55,6 +58,9 @@ func main() {
 		log.Fatalf("Failed to sign data: %v", err)
 	}
 	v, r, s := signedTx.RawSignatureValues()
+	vStr := fmt.Sprintf("0x%x", v)
+	rStr := fmt.Sprintf("0x%x", r)
+	sStr := fmt.Sprintf("0x%x", s)
 	fmt.Printf(`{
     "from": "%s",
     "data": {
@@ -86,8 +92,8 @@ func main() {
 		signableData.QuoteToken.Symbol,
 		signableData.QuoteToken.Decimals,
 		signableData.RFQDurationMs,
-		v.String(),
-		r.String(),
-		s.String(),
+		vStr,
+		rStr,
+		sStr,
 	)
 }

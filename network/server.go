@@ -314,9 +314,11 @@ func (s *Server) handleRFQRequest(event types.TxEvent) {
 	// Create an OpenRFQ transaction and broadcast it to the network
 
 	openRFQData := createOpenRFQData(tx, event.TxHash)
-	currentTime := time.Now().Unix()
+
+	currentTime := time.Now().UnixNano() / int64(time.Millisecond)
 	openRFQData.RFQStartTime = currentTime
 	openRFQData.RFQEndTime = currentTime + int64(tx.EmbeddedData().(*types.SignableData).RFQDurationMs)
+	openRFQData.Status = types.RFQStatusOpen
 	newOpenRfq := types.NewOpenRFQ(s.ServerOptions.PrivateKey.PublicKey().Address(), openRFQData)
 	txOpenRfq := types.NewTx(newOpenRfq)
 	signedTx, err := txOpenRfq.Sign(*s.ServerOptions.PrivateKey)
@@ -354,6 +356,7 @@ func createOpenRFQData(rfq *types.Transaction, txHash common.Hash) *types.RFQDat
 		RFQEndTime:         0,
 		SettlementContract: common.HexToAddress("0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"),
 		MatchingContract:   common.HexToAddress("0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"),
+		Status:             types.RFQStatusOpen,
 	}
 }
 
@@ -565,15 +568,17 @@ func (s *Server) processTransaction(tx *types.Transaction) error {
 		"mempool len", s.memPool.PendingCount(),
 	)
 
-	// You'll need to add logic here to perform the type checking since I don't know what the type will look like
-
 	go s.broadcastTx(tx)
 
 	s.memPool.Add(tx)
 
-	// og the RFQRequest has been verified we need to broadcast over websockets the start of a new tfq round
-	if tx.Type() == types.RFQRequestTxType {
+	switch tx.Type() {
+	case types.RFQRequestTxType:
+		// og the RFQRequest has been verified we need to broadcast over websockets the start of a new tfq round
 		s.Logger.Log("msg", "adding RFQRequestTx to event channel")
+		s.chain.EventChan <- types.TxEvent{TxType: tx.Type(), TxHash: tx.Hash(), Transaction: tx}
+	case types.QuoteTxType:
+		s.Logger.Log("msg", "adding QuoteTx to event channel")
 		s.chain.EventChan <- types.TxEvent{TxType: tx.Type(), TxHash: tx.Hash(), Transaction: tx}
 	}
 

@@ -98,6 +98,27 @@ type SignableData struct {
 	RFQDurationMs   uint64      `json:"rfqDurationMs"`
 }
 
+func (t *Token) EncodeRLP(w io.Writer) error {
+	return rlp.Encode(w, []interface{}{t.Address.Bytes(), t.Symbol, t.Decimals})
+}
+
+func (t *Token) DecodeRLP(s *rlp.Stream) error {
+	var data struct {
+		Address  common.Address
+		Symbol   string
+		Decimals uint64
+	}
+
+	if err := s.Decode(&data); err != nil {
+		return err
+	}
+
+	t.Address = data.Address
+	t.Symbol = data.Symbol
+	t.Decimals = data.Decimals
+	return nil
+}
+
 func (d SignableData) String() string {
 	return fmt.Sprintf("SignableData{RequestorId: %s, BaseTokenAmount: %s, BaseToken: %s, QuoteToken: %s, RFQDurationMs: %d}",
 		d.RequestorId,

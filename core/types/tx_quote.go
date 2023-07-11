@@ -3,11 +3,14 @@ package types
 import (
 	"bytes"
 	"encoding/binary"
-	"encoding/gob"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"log"
 	"math/big"
+	"strings"
 
 	"github.com/OCAX-labs/rfqrelayer/common"
 	cryptoocax "github.com/OCAX-labs/rfqrelayer/crypto/ocax"
@@ -34,11 +37,106 @@ type Quote struct {
 	S    *big.Int `json:"s"`
 }
 
+type Quotes []*Quote
+
 func NewQuote(from common.Address, data *QuoteData) *Quote {
 	return &Quote{
 		From: from,
 		Data: data,
 	}
+}
+
+func (tx *Quote) MarshalJSON() ([]byte, error) {
+	return json.Marshal(struct {
+		From common.Address `json:"from"`
+		Data *QuoteData     `json:"data"`
+		V    *big.Int       `json:"v"`
+		R    *big.Int       `json:"r"`
+		S    *big.Int       `json:"s"`
+	}{
+		From: tx.From,
+		Data: tx.Data,
+		V:    tx.V,
+		R:    tx.R,
+		S:    tx.S,
+	})
+}
+
+func (tx *Quote) UnmarshalJSON(data []byte) error {
+	type QuoteJSON struct {
+		From common.Address  `json:"from"`
+		Data json.RawMessage `json:"data"`
+		V    *big.Int        `json:"v"`
+		R    *big.Int        `json:"r"`
+		S    *big.Int        `json:"s"`
+	}
+
+	_, err := hex.DecodeString(strings.TrimPrefix(string(data), "0x"))
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	var quoteJSON QuoteJSON
+	if err := json.Unmarshal(data, &quoteJSON); err != nil {
+		return err
+	}
+
+	quoteData := &QuoteData{}
+	if err := json.Unmarshal(quoteJSON.Data, quoteData); err != nil {
+		return err
+	}
+	tx.From = quoteJSON.From
+	tx.Data = quoteData
+	tx.V = quoteJSON.V
+	tx.R = quoteJSON.R
+	tx.S = quoteJSON.S
+
+	return nil
+}
+
+func (q *Quote) EncodeRLP(w io.Writer) error {
+	if q.Data == nil {
+		return errors.New("Data field is nil")
+	}
+	return rlp.Encode(w, []interface{}{q.From, q.Data, q.V, q.R, q.S})
+}
+
+func (q *Quote) DecodeRLP(st *rlp.Stream) error {
+
+	_, err := st.List()
+	if err != nil {
+		return err
+	}
+
+	var from common.Address
+	if err := st.Decode(&from); err != nil {
+		return err
+	}
+	q.From = from
+
+	var data QuoteData
+	if err := st.Decode(&data); err != nil {
+		return err
+	}
+
+	q.Data = &data
+
+	var v, r, s *big.Int
+
+	if err := st.Decode(&v); err != nil {
+		return err
+	}
+	q.V = v
+	if err := st.Decode(&r); err != nil {
+		return err
+	}
+	q.R = r
+	if err := st.Decode(&s); err != nil {
+		return err
+	}
+	q.S = s
+
+	return st.ListEnd()
 }
 
 func (q *Quote) FromInterfaces(data []interface{}) error {
@@ -220,9 +318,9 @@ func (q *Quote) String() string {
 	)
 }
 
-func (q *Quote) Hash() common.Hash {
-	return common.BytesToHash(q.From.Bytes())
-}
+// func (q *Quote) Hash() common.Hash {
+// 	return common.BytesToHash(q.From.Bytes())
+// }
 
 // type quoteRLP struct {
 // 	From       *common.Address
@@ -279,7 +377,7 @@ func (tx *Quote) copy() TxData {
 		panic(fmt.Sprintf("failed to deep copy tx data: %v", err))
 	}
 
-	cpy.Data = &dataFields
+	cpy.Data = dataFields
 
 	return cpy
 }
@@ -297,6 +395,7 @@ func (tx *Quote) data() []byte {
 func (tx *Quote) rawSignatureValues() (v, r, s *big.Int) {
 	return tx.V, tx.R, tx.S
 }
+
 func (tx *Quote) setSignatureValues(v, r, s *big.Int) {
 	tx.V, tx.R, tx.S = v, r, s
 }
@@ -313,6 +412,48 @@ func (tx *Quote) referenceTxHash() common.Hash {
 	return tx.Data.RFQTxHash
 }
 
+func (qd *QuoteData) EncodeRLP(w io.Writer) error {
+	return rlp.Encode(w, []interface{}{
+		qd.QuoterId,
+		qd.RFQTxHash,
+		qd.QuoteExpiryTime,
+		qd.BaseToken,
+		qd.QuoteToken,
+		qd.BaseTokenAmount,
+		qd.BidPrice,
+		qd.AskPrice,
+		qd.EncryptionPublicKeys,
+	})
+}
+
+func (qd *QuoteData) DecodeRLP(s *rlp.Stream) error {
+	var dataToDecode struct {
+		QuoterId             string
+		RFQTxHash            common.Hash
+		QuoteExpiryTime      uint64
+		BaseToken            *Token
+		QuoteToken           *Token
+		BaseTokenAmount      *big.Int
+		BidPrice             *big.Int
+		AskPrice             *big.Int
+		EncryptionPublicKeys []*cryptoocax.PublicKey
+	}
+	if err := s.Decode(&dataToDecode); err != nil {
+		return err
+	}
+
+	qd.QuoterId = dataToDecode.QuoterId
+	qd.RFQTxHash = dataToDecode.RFQTxHash
+	qd.QuoteExpiryTime = dataToDecode.QuoteExpiryTime
+	qd.BaseToken = dataToDecode.BaseToken
+	qd.QuoteToken = dataToDecode.QuoteToken
+	qd.BaseTokenAmount = dataToDecode.BaseTokenAmount
+	qd.BidPrice = dataToDecode.BidPrice
+	qd.AskPrice = dataToDecode.AskPrice
+	qd.EncryptionPublicKeys = dataToDecode.EncryptionPublicKeys
+	return nil
+}
+
 func (tx *QuoteData) ToBytes() ([]byte, error) {
 	buf := new(bytes.Buffer)
 	if err := rlp.Encode(buf, tx); err != nil {
@@ -325,24 +466,20 @@ func (q *QuoteData) Validate() error {
 	return nil
 }
 
-func (q *QuoteData) deepCopy() (QuoteData, error) {
-	buf := new(bytes.Buffer)
-	enc := gob.NewEncoder(buf)
-	dec := gob.NewDecoder(buf)
-
-	err := enc.Encode(q)
-	if err != nil {
-		return QuoteData{}, err
+func (q *QuoteData) deepCopy() (*QuoteData, error) {
+	cpy := &QuoteData{
+		QuoterId:             string(q.QuoterId),
+		RFQTxHash:            q.RFQTxHash,
+		QuoteExpiryTime:      q.QuoteExpiryTime,
+		BaseToken:            q.BaseToken,
+		QuoteToken:           q.QuoteToken,
+		BaseTokenAmount:      q.BaseTokenAmount,
+		BidPrice:             q.BidPrice,
+		AskPrice:             q.AskPrice,
+		EncryptionPublicKeys: []*cryptoocax.PublicKey{},
 	}
+	cpy.EncryptionPublicKeys = make([]*cryptoocax.PublicKey, len(q.EncryptionPublicKeys))
+	copy(cpy.EncryptionPublicKeys, q.EncryptionPublicKeys)
 
-	var copy QuoteData
-	if err := dec.Decode(&copy); err != nil {
-		return QuoteData{}, err
-	}
-
-	return copy, nil
-}
-
-func init() {
-	gob.Register(QuoteData{})
+	return cpy, nil
 }

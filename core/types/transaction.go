@@ -68,15 +68,14 @@ type TxData interface {
 	// rfqData() *SignableData
 	// openRFQData() *RFQData
 	embeddedData() interface{} // returns the struct that is embedded in the transaction
-
 	rawSignatureValues() (v, r, s *big.Int)
 	setSignatureValues(v, r, s *big.Int)
 	referenceTxHash() common.Hash // add this
 }
 
-type EmbeddedData interface {
-	embeddedData()
-}
+// type EmbeddedData interface {
+// 	embeddedData()
+// }
 
 func (tx *Transaction) EncodeRLP(w io.Writer) error {
 	buf := encodeBufferPool.Get().(*bytes.Buffer)
@@ -86,7 +85,6 @@ func (tx *Transaction) EncodeRLP(w io.Writer) error {
 		return err
 	}
 
-	fmt.Printf("Encoded transaction: %x\n", buf.Bytes())
 	return rlp.Encode(w, buf.Bytes())
 }
 
@@ -104,8 +102,6 @@ func (tx *Transaction) DecodeRLP(s *rlp.Stream) error {
 	if b, err = s.Bytes(); err != nil {
 		return err
 	}
-
-	fmt.Printf("Decoding transaction. Length: %d\n", len(b)) // Debug output
 
 	inner, err := tx.decodeTyped(b)
 	if err == nil {
@@ -142,7 +138,6 @@ func (tx *Transaction) decodeTyped(b []byte) (TxData, error) {
 	switch b[0] {
 	case RFQRequestTxType:
 		var inner RFQRequest
-		fmt.Printf("Trying to decode RFQRequest. Bytes: %v\n", b[1:])
 		err := rlp.DecodeBytes(b[1:], &inner)
 		// err := rlp.DecodeBytes(b[1:], &inner)
 		return &inner, err
@@ -195,7 +190,10 @@ func (tx *Transaction) EmbeddedData() interface{} {
 		return tx.inner.embeddedData().(*SignableData)
 	case OpenRFQTxType:
 		return tx.inner.embeddedData().(*RFQData)
+	case QuoteTxType:
+		return tx.inner.embeddedData().(*QuoteData)
 	}
+
 	return txData
 }
 
@@ -290,10 +288,7 @@ func (tx *Transaction) Verify() error {
 	if !cryptoocax.ValidateSignatureValues(byte(v.Uint64()), r, s) {
 		return fmt.Errorf("invalid signature values")
 	}
-
 	hash := tx.Hash() // Calculate the transaction hash here.
-	fmt.Printf("TX hash: %+v\n", hash.Hex())
-	fmt.Printf("Tx data: %+v\n", tx.inner)
 	recoveredPubKey, err := cryptoocax.Ecrecover(hash.Bytes(), sig.ToBytes())
 	if err != nil {
 		return fmt.Errorf("failed to recover public key: %v", err)
@@ -305,7 +300,6 @@ func (tx *Transaction) Verify() error {
 	}
 
 	recoveredAddr := crypto.PubkeyToAddress(*pubKey)
-	fmt.Printf("recoveredAddr: %+v\n", recoveredAddr)
 	fromAddress := tx.inner.from()
 	if fromAddress == nil {
 		return fmt.Errorf("no from address")

@@ -9,4 +9,4 @@ type TxEvent struct {
 }
 
 // used to allow listeners to be registered for events
-type OpenRFQCallback func(*OpenRFQ)
+type OpenRFQCallback func(*Transaction)

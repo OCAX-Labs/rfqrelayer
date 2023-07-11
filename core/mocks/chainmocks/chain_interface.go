@@ -17,6 +17,32 @@ type ChainInterface struct {
 	mock.Mock
 }
 
+// GetAuctionQuotes provides a mock function with given fields: rfqTxhash
+func (_m *ChainInterface) GetAuctionQuotes(rfqTxhash common.Hash) ([]*types.Quote, error) {
+	ret := _m.Called(rfqTxhash)
+
+	var r0 []*types.Quote
+	var r1 error
+	if rf, ok := ret.Get(0).(func(common.Hash) ([]*types.Quote, error)); ok {
+		return rf(rfqTxhash)
+	}
+	if rf, ok := ret.Get(0).(func(common.Hash) []*types.Quote); ok {
+		r0 = rf(rfqTxhash)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).([]*types.Quote)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(common.Hash) error); ok {
+		r1 = rf(rfqTxhash)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
 // GetBlock provides a mock function with given fields: height
 func (_m *ChainInterface) GetBlock(height *big.Int) (*types.Block, error) {
 	ret := _m.Called(height)
@@ -88,6 +114,32 @@ func (_m *ChainInterface) GetBlockHeader(height *big.Int) (*types.Header, error)
 
 	if rf, ok := ret.Get(1).(func(*big.Int) error); ok {
 		r1 = rf(height)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// GetClosedRFQRequests provides a mock function with given fields:
+func (_m *ChainInterface) GetClosedRFQRequests() ([]*types.OpenRFQ, error) {
+	ret := _m.Called()
+
+	var r0 []*types.OpenRFQ
+	var r1 error
+	if rf, ok := ret.Get(0).(func() ([]*types.OpenRFQ, error)); ok {
+		return rf()
+	}
+	if rf, ok := ret.Get(0).(func() []*types.OpenRFQ); ok {
+		r0 = rf()
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).([]*types.OpenRFQ)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func() error); ok {
+		r1 = rf()
 	} else {
 		r1 = ret.Error(1)
 	}

@@ -79,11 +79,9 @@ type RFQRequestBody struct {
 }
 
 type QuoteBody struct {
-	From string           `json:"from"`
-	Data *types.QuoteData `json:"data"`
-	V    *big.Int         `json:"v"`
-	R    *big.Int         `json:"r"`
-	S    *big.Int         `json:"s"`
+	From            string           `json:"from"`
+	Data            *types.QuoteData `json:"data"`
+	SignatureString string           `json:"signature"`
 }
 
 type Header struct {
@@ -134,6 +132,8 @@ func (s *Server) Start() error {
 	e.POST("/rfqs", s.handlePostRFQRequest)
 	e.GET("/openRFQs", s.handleGetOpenRFQRequests)
 	e.GET("/openRFQs/:txHash", s.handleGetOpenRFQRequest)
+	e.GET("/closedRFQs", s.handleGetClosedRFQRequests)
+	e.GET("/quotes/:rfqTxHash", s.handleGetAuctionQuotes)
 	e.POST("/quotes", s.handlePostQuote)
 
 	// websockets for broadcast of RFQRequest
@@ -277,6 +277,7 @@ func (s *Server) handlePostRFQRequest(c echo.Context) error {
 	if err != nil {
 		return c.JSON(http.StatusBadRequest, APIError{Error: err.Error()})
 	}
+
 	s.bc.WriteRFQTxs(signedTx)
 
 	// Broadcast to the blockchain
@@ -286,18 +287,37 @@ func (s *Server) handlePostRFQRequest(c echo.Context) error {
 
 }
 
-func (s *Server) handlePostQuote(c echo.Context) error {
-	quoteDataBody := new(QuoteBody)
-	body, err := ioutil.ReadAll(c.Request().Body)
+func (s *Server) handleGetClosedRFQRequests(c echo.Context) error {
+	rfqRequests, err := s.bc.GetClosedRFQRequests()
 	if err != nil {
 		return c.JSON(http.StatusBadRequest, APIError{Error: err.Error()})
 	}
 
-	err = json.Unmarshal(body, quoteDataBody)
+	return c.JSON(http.StatusOK, intoJSONOpenRFQS(rfqRequests))
+}
+
+func (s *Server) handleGetAuctionQuotes(c echo.Context) error {
+	rfqTxHash := c.Param("rfqTxHash")
+	b, err := hex.DecodeString(rfqTxHash)
 	if err != nil {
 		return c.JSON(http.StatusBadRequest, APIError{Error: err.Error()})
 	}
-	rfqTxHash := quoteDataBody.Data.RFQTxHash
+	hashFromBytes := common.HashFromBytes(b)
+	auctionQuotes, err := s.bc.GetAuctionQuotes(hashFromBytes)
+	if err != nil {
+		return c.JSON(http.StatusBadRequest, APIError{Error: err.Error()})
+	}
+	return c.JSON(http.StatusOK, auctionQuotes)
+}
+
+func (s *Server) handlePostQuote(c echo.Context) error {
+	decoder := json.NewDecoder(c.Request().Body)
+	var quoteBody QuoteBody
+	err := decoder.Decode(&quoteBody)
+	if err != nil {
+		return c.JSON(http.StatusBadRequest, APIError{Error: err.Error()})
+	}
+	rfqTxHash := quoteBody.Data.RFQTxHash
 	openRFQ, err := s.bc.GetOpenRFQByHash(rfqTxHash)
 	if err != nil {
 		return c.JSON(http.StatusBadRequest, APIError{Error: "RFQ does not exist or has already expired"})
@@ -305,20 +325,35 @@ func (s *Server) handlePostQuote(c echo.Context) error {
 	if time.Now().Unix() > openRFQ.Data.RFQEndTime {
 		return c.JSON(http.StatusBadRequest, APIError{Error: "RFQ is no longer open"})
 	}
-
-	quoteData := quoteDataBody.Data
+	quoteData := quoteBody.Data
 	if err := quoteData.Validate(); err != nil {
 		return c.JSON(http.StatusBadRequest, APIError{Error: err.Error()})
 	}
 
-	quote := types.NewQuote(common.HexToAddress(quoteDataBody.From), quoteData)
+	signature, err := cryptoocax.DeserializeSigFromHexString(quoteBody.SignatureString)
+	if err != nil {
+		return c.JSON(http.StatusBadRequest, APIError{Error: err.Error()})
+	}
 
-	quote.V = quoteDataBody.V
-	quote.R = quoteDataBody.R
-	quote.S = quoteDataBody.S
+	quote := types.NewQuote(common.HexToAddress(quoteBody.From), quoteBody.Data)
+	signer := types.NewSigner()
+	quoteTx := types.NewTx(quote)
 
-	// Add the quote to the RFQ
+	signedTx, err := quoteTx.WithSignature(signer, signature.ToBytes())
+	if err != nil {
+		return c.JSON(http.StatusBadRequest, APIError{Error: err.Error()})
+	}
+
+	fmt.Printf("HANDLER signedTx: %+v\n", signedTx)
+
+	err = signedTx.Verify()
+	if err != nil {
+		return c.JSON(http.StatusBadRequest, APIError{Error: err.Error()})
+	}
 	// update the openRFQ in memory
+	s.bc.WriteRFQTxs(signedTx)
+	s.txChan <- signedTx
+
 	s.bc.UpdateActiveRFQ(rfqTxHash, quote)
 
 	return c.JSON(http.StatusCreated, openRFQ)

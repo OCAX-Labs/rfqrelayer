@@ -17,6 +17,11 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+var (
+	quoteAddress = common.HexToAddress("0x9fB29AAc15b9A4B7F17c3385939b007540f4d791")
+	quoteSig     = &cryptoocax.Signature{R: big.NewInt(1), S: big.NewInt(1), V: big.NewInt(28)}
+)
+
 func TestBaseTokenRLPEncoding(t *testing.T) {
 	token := &BaseToken{
 		Address:  common.HexToAddress("0x1234567890"),
@@ -544,4 +549,144 @@ func randomTxWithSignature(t *testing.T, key cryptoocax.PrivateKey) *Transaction
 	assert.Nil(t, err)
 
 	return signedTx
+}
+
+func TestTokenRLPEncodingDecoding(t *testing.T) {
+	token := &Token{
+		Address:  common.HexToAddress("0x1234567890ABCDEF1234567890ABCDEF123456789"),
+		Symbol:   "XYZ",
+		Decimals: 18,
+	}
+
+	bytes, err := rlp.EncodeToBytes(token)
+	if err != nil {
+		t.Fatalf("failed to encode: %v", err)
+	}
+
+	decodedToken := new(Token)
+	err = rlp.DecodeBytes(bytes, decodedToken)
+	if err != nil {
+		t.Fatalf("failed to decode: %v", err)
+	}
+
+	if decodedToken.Address != token.Address {
+		t.Errorf("expected %v, got %v", token.Address, decodedToken.Address)
+	}
+
+	if decodedToken.Symbol != token.Symbol {
+		t.Errorf("expected %v, got %v", token.Symbol, decodedToken.Symbol)
+	}
+
+	if decodedToken.Decimals != token.Decimals {
+		t.Errorf("expected %v, got %v", token.Decimals, decodedToken.Decimals)
+	}
+}
+
+func TestQuoteRLPEncodingDecoding(t *testing.T) {
+	privateKey := cryptoocax.GeneratePrivateKey()
+	publicKey := privateKey.PublicKey()
+	from := publicKey.Address()
+
+	baseToken := &BaseToken{
+		Address:  common.HexToAddress("0x9f8F72aA9304c8B593d555F12eF6589cC3A579A2"),
+		Symbol:   "ABC",
+		Decimals: 18,
+	}
+
+	quoteToken := &QuoteToken{
+		Address:  common.HexToAddress("0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"),
+		Symbol:   "XYZ",
+		Decimals: 18,
+	}
+
+	quote := NewQuote(
+		from,
+		&QuoteData{
+			QuoterId:             "1234",
+			RFQTxHash:            common.HexToHash("0x1234567890"),
+			QuoteExpiryTime:      1609459200,
+			BaseToken:            baseToken,  // Populate with actual data
+			QuoteToken:           quoteToken, // Populate with actual data
+			BaseTokenAmount:      big.NewInt(10000),
+			BidPrice:             big.NewInt(200),
+			AskPrice:             big.NewInt(300),
+			EncryptionPublicKeys: []*cryptoocax.PublicKey{}, // Populate with actual data
+		},
+	)
+
+	fmt.Printf("From: %s\n", hex.EncodeToString(quote.From[:]))
+	fmt.Printf("Data: %+v\n", quote.Data)
+	fmt.Printf("V: %s\n", quote.V.String())
+	fmt.Printf("R: %s\n", quote.R.String())
+	fmt.Printf("S: %s\n", quote.S.String())
+	encodedData, err := rlp.EncodeToBytes(quote)
+	assert.Nil(t, err)
+	fmt.Printf("Encoded data: %s\n", hex.EncodeToString(encodedData))
+	tx := NewTx(quote)
+	signedTx, err := tx.Sign(privateKey)
+	assert.Nil(t, err)
+
+	buf := new(bytes.Buffer)
+	if err := signedTx.EncodeRLP(buf); err != nil {
+		t.Fatalf("failed to encode: %v", err)
+	}
+
+	fmt.Printf("Encoded data: %s\n", hex.EncodeToString(encodedData))
+	// Reset buffer read pointer
+	// buf.Reset()
+
+	decodedTx := &Transaction{} // Create new Transaction for decoding
+	if err := decodedTx.DecodeRLP(rlp.NewStream(buf, 0)); err != nil {
+		t.Fatalf("failed to decode: %v", err)
+	}
+
+	signedDecodedTx, err := decodedTx.Sign(privateKey)
+	assert.Nil(t, err)
+
+	// Comparing the encoded quote data with the decoded one
+	if signedDecodedTx.EmbeddedData().(*QuoteData).QuoterId != quote.Data.QuoterId {
+		t.Errorf("expected %s, got %s", quote.Data.QuoterId, signedDecodedTx.EmbeddedData().(*QuoteData).QuoterId)
+	}
+}
+
+func TestQuoteDataRLPEncodingDecoding(t *testing.T) {
+
+	baseToken := &BaseToken{
+		Address:  common.HexToAddress("0x1234567890"),
+		Symbol:   "ABC",
+		Decimals: 18,
+	}
+
+	quoteToken := &QuoteToken{
+		Address:  common.HexToAddress("0x1234567890"),
+		Symbol:   "XYZ",
+		Decimals: 18,
+	}
+
+	quoteData := &QuoteData{
+		QuoterId:             "1234",
+		RFQTxHash:            common.Hash{},
+		QuoteExpiryTime:      1609459200,
+		BaseToken:            baseToken,
+		QuoteToken:           quoteToken,
+		BaseTokenAmount:      big.NewInt(100),
+		BidPrice:             big.NewInt(200),
+		AskPrice:             big.NewInt(300),
+		EncryptionPublicKeys: []*cryptoocax.PublicKey{},
+	}
+
+	buf := new(bytes.Buffer)
+	if err := quoteData.EncodeRLP(buf); err != nil {
+		t.Fatalf("failed to encode: %v", err)
+	}
+
+	quoteDataDecoded := new(QuoteData)
+	if err := quoteDataDecoded.DecodeRLP(rlp.NewStream(buf, 0)); err != nil {
+		t.Fatalf("failed to decode: %v", err)
+	}
+
+	// Add more asserts as per the requirement
+	if quoteDataDecoded.QuoterId != quoteData.QuoterId {
+		t.Errorf("expected %s, got %s", quoteData.QuoterId, quoteDataDecoded.QuoterId)
+	}
 }
